@@ -299,7 +299,12 @@ def main():
 
     task = get_next_task()
     if not task:
-        log("No ready tasks. Nothing to do.")
+        log("No ready tasks.")
+        # Output message for Discord delivery
+        print(json.dumps({
+            "type": "idle",
+            "message": "📋 **No pending tasks on the Metaphors kanban board.**\n\nAdd a new task with:\n```\nhermes kanban create \"Task title\" --assignee default --body \"Description...\"\n```\nOr tell me what to build next."
+        }))
         return
 
     task_id = task["id"]
