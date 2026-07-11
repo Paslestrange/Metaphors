@@ -39,9 +39,33 @@ async def health():
 async def list_metaphors():
     """List all available metaphor renderers."""
     names = registry.list()
+    # Return rich metaphor metadata
+    metaphor_info = []
+    descriptions = {
+        "city": "Infrastructure as a cityscape",
+        "solar": "Systems as orbiting celestial bodies",
+        "forest": "Services as a living forest ecosystem",
+    }
+    for name in names:
+        metaphor_info.append({
+            "id": name,
+            "name": name.capitalize(),
+            "description": descriptions.get(name, f"The {name} metaphor"),
+        })
+    # Also include client-side-only metaphors that have frontend renderers
+    # but aren't registered server-side (solar, forest)
+    known_client = ["solar", "forest"]
+    for name in known_client:
+        if name not in names:
+            metaphor_info.append({
+                "id": name,
+                "name": name.capitalize(),
+                "description": descriptions.get(name, f"The {name} metaphor"),
+            })
     return {
-        "metaphors": names,
+        "metaphors": metaphor_info,
         "active": active_metaphor,
+        "default": active_metaphor,
     }
 
 

@@ -46,8 +46,12 @@ async def test_get_metaphors_list():
             assert r.status_code == 200
             d = r.json()
             assert 'metaphors' in d
-            assert 'city' in d['metaphors']
+            # metaphors is now a list of objects with id/name/description
+            ids = [m['id'] for m in d['metaphors']]
+            assert 'city' in ids
             assert d['active'] == 'city'
+            assert 'default' in d
+            assert 'default' in d
     finally:
         si.should_exit = True
         await task

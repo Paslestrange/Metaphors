@@ -1,6 +1,8 @@
 // static/main.js
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const minimapCanvas = document.getElementById('minimap');
+const minimapCtx = minimapCanvas.getContext('2d');
 
 let entities = [];
 let selectedEntity = null;
@@ -21,9 +23,10 @@ let panOffsetX = 0;
 let panOffsetY = 0;
 
 // --- Metaphor state ---
-let currentMetaphor = 'city';
+let currentMetaphor = localStorage.getItem('metaphor') || 'city';
 let availableMetaphors = [];
 let metaphorRenderers = {};
+let isTransitioning = false;
 
 // --- State colors ---
 const COLORS = {
@@ -42,12 +45,6 @@ const COLORS = {
 // ============================================================
 // Metaphor Renderer Registry
 // ============================================================
-
-/**
- * Each metaphor renderer is an object with:
- *   - computeLayout(entities, width, height) -> { [entityId]: {x, y, w, h} }
- *   - render(ctx, entities, layout, width, height, colors) -> void
- */
 
 metaphorRenderers.city = {
     computeLayout(entities, W, H) {
@@ -83,11 +80,8 @@ metaphorRenderers.city = {
     },
 
     render(ctx, entities, layout, W, H, COLORS) {
-        // Background
         ctx.fillStyle = '#0a0a1a';
         ctx.fillRect(0, 0, W, H);
-
-        // Ground
         ctx.fillStyle = '#1a1a2e';
         ctx.fillRect(0, H - 40, W, 40);
 
@@ -113,14 +107,12 @@ metaphorRenderers.city = {
                 ctx.font = '11px system-ui, sans-serif';
                 ctx.fillText(entity.name, pos.x + 6, pos.y + 16);
             } else if (entity.type === 'service') {
-                // Building
                 ctx.fillStyle = color;
                 ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
                 ctx.strokeStyle = '#000';
                 ctx.lineWidth = 1;
                 ctx.strokeRect(pos.x, pos.y, pos.w, pos.h);
 
-                // Windows
                 if (pos.h > 30 && pos.w > 15) {
                     for (let wy = pos.y + 8; wy < pos.y + pos.h - 8; wy += 12) {
                         for (let wx = pos.x + 4; wx < pos.x + pos.w - 4; wx += 10) {
@@ -136,7 +128,6 @@ metaphorRenderers.city = {
                     }
                 }
 
-                // Label
                 if (pos.w > 30) {
                     ctx.fillStyle = '#fff';
                     ctx.font = '9px system-ui, sans-serif';
@@ -144,7 +135,6 @@ metaphorRenderers.city = {
                     ctx.fillText(label, pos.x + 2, pos.y + pos.h + 12);
                 }
             } else {
-                // Generic fallback: colored rectangle
                 ctx.fillStyle = color;
                 ctx.globalAlpha = 0.6;
                 ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
@@ -160,7 +150,7 @@ metaphorRenderers.city = {
     }
 };
 
-// Solar System metaphor (placeholder renderer)
+// Solar System metaphor
 metaphorRenderers.solar = {
     computeLayout(entities, W, H) {
         const layout = {};
@@ -172,7 +162,7 @@ metaphorRenderers.solar = {
 
         roots.forEach((root, i) => {
             const orbitR = 60 + i * 70;
-            layout[root.id] = { x: cx - 20, y: cy - orbitR - 20, w: 40, h: 40, cx: cx, cy: cy, r: orbitR };
+            layout[root.id] = { x: cx - 20, y: cy - orbitR - 20, w: 40, h: 40 };
 
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
             children.forEach((child, ci) => {
@@ -200,7 +190,6 @@ metaphorRenderers.solar = {
         ctx.fillStyle = '#0a0a1a';
         ctx.fillRect(0, 0, W, H);
 
-        // Draw orbits
         const cx = W / 2;
         const cy = H / 2;
         const roots = entities.filter(e => !e.parent);
@@ -213,13 +202,11 @@ metaphorRenderers.solar = {
             ctx.stroke();
         });
 
-        // Draw sun
         ctx.beginPath();
         ctx.arc(cx, cy, 20, 0, Math.PI * 2);
         ctx.fillStyle = '#fbbf24';
         ctx.fill();
 
-        // Draw entities as planets
         entities.forEach(entity => {
             const pos = layout[entity.id];
             if (!pos) return;
@@ -236,7 +223,6 @@ metaphorRenderers.solar = {
             ctx.lineWidth = 1;
             ctx.stroke();
 
-            // Label
             ctx.fillStyle = '#e5e7eb';
             ctx.font = '9px system-ui, sans-serif';
             const label = entity.name.slice(0, 10);
@@ -245,7 +231,7 @@ metaphorRenderers.solar = {
     }
 };
 
-// Forest metaphor (placeholder renderer)
+// Forest metaphor
 metaphorRenderers.forest = {
     computeLayout(entities, W, H) {
         const layout = {};
@@ -260,7 +246,6 @@ metaphorRenderers.forest = {
             layout[root.id] = { x: tx - 15, y: H - trunkH - 40, w: 30, h: trunkH };
 
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
-            const branchSpread = spacing * 0.8;
             children.forEach((child, ci) => {
                 const angle = -Math.PI/2 + (ci - (children.length-1)/2) * 0.5;
                 const branchLen = 60;
@@ -286,13 +271,8 @@ metaphorRenderers.forest = {
     render(ctx, entities, layout, W, H, COLORS) {
         ctx.fillStyle = '#0a0a1a';
         ctx.fillRect(0, 0, W, H);
-
-        // Ground
         ctx.fillStyle = '#1a2e1a';
         ctx.fillRect(0, H - 40, W, 40);
-
-        const byId = {};
-        entities.forEach(e => byId[e.id] = e);
 
         entities.forEach(entity => {
             const pos = layout[entity.id];
@@ -300,14 +280,12 @@ metaphorRenderers.forest = {
             const color = COLORS[entity.state] || COLORS.unknown;
 
             if (entity.type === 'cluster') {
-                // Tree trunk
                 ctx.fillStyle = '#78350f';
                 ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
                 ctx.fillStyle = color;
                 ctx.font = 'bold 11px system-ui, sans-serif';
                 ctx.fillText(entity.name, pos.x - 20, pos.y - 8);
             } else if (entity.type === 'node') {
-                // Branch / canopy
                 ctx.beginPath();
                 ctx.arc(pos.x + pos.w/2, pos.y + pos.h/2, pos.w/2, 0, Math.PI * 2);
                 ctx.fillStyle = color;
@@ -318,7 +296,6 @@ metaphorRenderers.forest = {
                 ctx.font = '9px system-ui, sans-serif';
                 ctx.fillText(entity.name.slice(0, 10), pos.x - 5, pos.y - 4);
             } else {
-                // Fruit / leaf
                 ctx.beginPath();
                 ctx.arc(pos.x + pos.w/2, pos.y + pos.h/2, pos.w/2, 0, Math.PI * 2);
                 ctx.fillStyle = color;
@@ -338,6 +315,13 @@ function resize() {
     canvas.style.width = rect.width + 'px';
     canvas.style.height = rect.height + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    // Minimap sizing
+    const mmRect = minimapCanvas.getBoundingClientRect();
+    minimapCanvas.width = mmRect.width * DPR;
+    minimapCanvas.height = mmRect.height * DPR;
+    minimapCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
     render();
 }
 window.addEventListener('resize', resize);
@@ -369,13 +353,59 @@ async function fetchMetaphors() {
         const res = await fetch('/api/metaphors');
         const data = await res.json();
         availableMetaphors = data.metaphors || [];
-        currentMetaphor = data.default || 'city';
+        // Restore from localStorage or use server default
+        const saved = localStorage.getItem('metaphor');
+        if (saved && availableMetaphors.some(m => m.id === saved)) {
+            currentMetaphor = saved;
+        } else {
+            currentMetaphor = data.default || data.active || 'city';
+        }
         buildToolbar();
     } catch (e) {
         console.error('Failed to fetch metaphors:', e);
-        availableMetaphors = [{ id: 'city', name: 'City', description: 'Default' }];
+        availableMetaphors = [
+            { id: 'city', name: 'City', description: 'Infrastructure as a cityscape' },
+            { id: 'solar', name: 'Solar', description: 'Systems as orbiting celestial bodies' },
+            { id: 'forest', name: 'Forest', description: 'Services as a living forest ecosystem' },
+        ];
         buildToolbar();
     }
+}
+
+// ============================================================
+// Metaphor switching with fade transition
+// ============================================================
+function switchMetaphor(newMetaphor) {
+    if (newMetaphor === currentMetaphor || isTransitioning) return;
+    if (!metaphorRenderers[newMetaphor]) return;
+
+    isTransitioning = true;
+    const overlay = document.getElementById('fade-overlay');
+
+    // Fade out
+    overlay.classList.add('active');
+
+    setTimeout(() => {
+        currentMetaphor = newMetaphor;
+        localStorage.setItem('metaphor', newMetaphor);
+
+        // Update toolbar description
+        const meta = availableMetaphors.find(m => m.id === newMetaphor);
+        const descEl = document.querySelector('#toolbar div[style*="font-size:11px;color:#6b7280"]');
+        if (descEl && meta) descEl.textContent = meta.description;
+
+        // Update select
+        const select = document.getElementById('metaphor-select');
+        if (select) select.value = newMetaphor;
+
+        render();
+
+        // Fade in
+        setTimeout(() => {
+            overlay.classList.remove('active');
+            isTransitioning = false;
+        }, 50);
+    }, 250);
 }
 
 // ============================================================
@@ -418,6 +448,9 @@ function render() {
     if (hoveredEntity) {
         drawTooltip(hoveredEntity, W, H);
     }
+
+    // Render minimap
+    renderMinimap(W, H);
 }
 
 function drawTooltip(entity, W, H) {
@@ -452,6 +485,115 @@ function drawTooltip(entity, W, H) {
         ctx.fillText(line, tx + 8, ty + 20 + i * 18);
     });
 }
+
+// ============================================================
+// Minimap
+// ============================================================
+function renderMinimap(mainW, mainH) {
+    const mmW = minimapCanvas.width / DPR;
+    const mmH = minimapCanvas.height / DPR;
+
+    minimapCtx.clearRect(0, 0, mmW, mmH);
+    minimapCtx.fillStyle = '#111827';
+    minimapCtx.fillRect(0, 0, mmW, mmH);
+
+    if (!entities.length || !Object.keys(currentLayout).length) return;
+
+    // Compute bounding box of all entities in world space
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    entities.forEach(e => {
+        const pos = currentLayout[e.id];
+        if (!pos) return;
+        minX = Math.min(minX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxX = Math.max(maxX, pos.x + pos.w);
+        maxY = Math.max(maxY, pos.y + pos.h);
+    });
+
+    if (minX === Infinity) return;
+
+    const worldW = maxX - minX || 1;
+    const worldH = maxY - minY || 1;
+    const padding = 8;
+    const scaleX = (mmW - padding * 2) / worldW;
+    const scaleY = (mmH - padding * 2) / worldH;
+    const scale = Math.min(scaleX, scaleY);
+
+    const offsetX = padding + ((mmW - padding * 2) - worldW * scale) / 2;
+    const offsetY = padding + ((mmH - padding * 2) - worldH * scale) / 2;
+
+    // Draw entities as colored dots
+    entities.forEach(e => {
+        const pos = currentLayout[e.id];
+        if (!pos) return;
+        const color = COLORS[e.state] || COLORS.unknown;
+        const x = offsetX + (pos.x - minX) * scale;
+        const y = offsetY + (pos.y - minY) * scale;
+        const w = Math.max(2, pos.w * scale);
+        const h = Math.max(2, pos.h * scale);
+        minimapCtx.fillStyle = color;
+        minimapCtx.globalAlpha = 0.7;
+        minimapCtx.fillRect(x, y, w, h);
+    });
+    minimapCtx.globalAlpha = 1.0;
+
+    // Draw viewport rectangle
+    const vpLeft = (-panX / zoom);
+    const vpTop = (-panY / zoom);
+    const vpRight = vpLeft + (mainW / zoom);
+    const vpBottom = vpTop + (mainH / zoom);
+
+    const vpX = offsetX + (vpLeft - minX) * scale;
+    const vpY = offsetY + (vpTop - minY) * scale;
+    const vpW = (vpRight - vpLeft) * scale;
+    const vpH = (vpBottom - vpTop) * scale;
+
+    minimapCtx.strokeStyle = '#60a5fa';
+    minimapCtx.lineWidth = 1.5;
+    minimapCtx.strokeRect(vpX, vpY, vpW, vpH);
+}
+
+// Minimap click to navigate
+minimapCanvas.addEventListener('click', (e) => {
+    const mmRect = minimapCanvas.getBoundingClientRect();
+    const mx = e.clientX - mmRect.left;
+    const my = e.clientY - mmRect.top;
+    const mmW = minimapCanvas.width / DPR;
+    const mmH = minimapCanvas.height / DPR;
+
+    if (!entities.length || !Object.keys(currentLayout).length) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    entities.forEach(ent => {
+        const pos = currentLayout[ent.id];
+        if (!pos) return;
+        minX = Math.min(minX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxX = Math.max(maxX, pos.x + pos.w);
+        maxY = Math.max(maxY, pos.y + pos.h);
+    });
+    if (minX === Infinity) return;
+
+    const worldW = maxX - minX || 1;
+    const worldH = maxY - minY || 1;
+    const padding = 8;
+    const scaleX = (mmW - padding * 2) / worldW;
+    const scaleY = (mmH - padding * 2) / worldH;
+    const scale = Math.min(scaleX, scaleY);
+    const offsetX = padding + ((mmW - padding * 2) - worldW * scale) / 2;
+    const offsetY = padding + ((mmH - padding * 2) - worldH * scale) / 2;
+
+    // Convert minimap click to world coordinates
+    const worldX = minX + (mx - offsetX) / scale;
+    const worldY = minY + (my - offsetY) / scale;
+
+    // Center view on that world position
+    const mainW = canvas.width / DPR;
+    const mainH = canvas.height / DPR;
+    panX = -(worldX * zoom - mainW / 2);
+    panY = -(worldY * zoom - mainH / 2);
+    render();
+});
 
 // ============================================================
 // Mouse interaction (with zoom/pan transform)
@@ -495,7 +637,6 @@ canvas.addEventListener('mousemove', (e) => {
 
 canvas.addEventListener('mousedown', (e) => {
     if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-        // Middle click or shift+click = pan
         isPanning = true;
         panStartX = mouseX;
         panStartY = mouseY;
@@ -531,7 +672,6 @@ canvas.addEventListener('wheel', (e) => {
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     const newZoom = Math.max(0.2, Math.min(5.0, zoom * delta));
 
-    // Zoom towards cursor
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
@@ -562,6 +702,76 @@ document.getElementById('zoom-reset').addEventListener('click', () => {
 });
 
 // ============================================================
+// Keyboard shortcuts
+// ============================================================
+document.addEventListener('keydown', (e) => {
+    // Don't capture when typing in inputs
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+
+    const PAN_STEP = 40;
+
+    switch (e.key) {
+        // Number keys 1-9: switch metaphor
+        case '1': case '2': case '3': case '4': case '5':
+        case '6': case '7': case '8': case '9': {
+            const idx = parseInt(e.key) - 1;
+            if (idx < availableMetaphors.length) {
+                switchMetaphor(availableMetaphors[idx].id);
+            }
+            break;
+        }
+
+        // +/- for zoom
+        case '+': case '=':
+            zoom = Math.min(5.0, zoom * 1.25);
+            render();
+            break;
+        case '-': case '_':
+            zoom = Math.max(0.2, zoom * 0.8);
+            render();
+            break;
+
+        // Arrow keys for pan
+        case 'ArrowLeft':
+            panX += PAN_STEP;
+            render();
+            e.preventDefault();
+            break;
+        case 'ArrowRight':
+            panX -= PAN_STEP;
+            render();
+            e.preventDefault();
+            break;
+        case 'ArrowUp':
+            panY += PAN_STEP;
+            render();
+            e.preventDefault();
+            break;
+        case 'ArrowDown':
+            panY -= PAN_STEP;
+            render();
+            e.preventDefault();
+            break;
+
+        // Escape: deselect / close detail panel
+        case 'Escape':
+            selectedEntity = null;
+            hideDetailPanel();
+            render();
+            break;
+
+        // 0 or Home: reset view
+        case '0':
+        case 'Home':
+            zoom = 1.0;
+            panX = 0;
+            panY = 0;
+            render();
+            break;
+    }
+});
+
+// ============================================================
 // Detail panel
 // ============================================================
 function showDetailPanel(entity) {
@@ -574,25 +784,21 @@ function showDetailPanel(entity) {
     const stateColor = COLORS[entity.state] || COLORS.unknown;
     let html = '';
 
-    // State badge
     html += `<div class="detail-row">
         <span class="detail-key">State</span>
         <span class="detail-state" style="background:${stateColor};color:#000;">${entity.state}</span>
     </div>`;
 
-    // Type
     html += `<div class="detail-row">
         <span class="detail-key">Type</span>
         <span class="detail-value">${entity.type}</span>
     </div>`;
 
-    // ID
     html += `<div class="detail-row">
         <span class="detail-key">ID</span>
         <span class="detail-value" style="font-family:monospace;font-size:10px;">${entity.id}</span>
     </div>`;
 
-    // Source
     if (entity.source) {
         html += `<div class="detail-row">
             <span class="detail-key">Source</span>
@@ -600,7 +806,6 @@ function showDetailPanel(entity) {
         </div>`;
     }
 
-    // Parent
     if (entity.parent) {
         html += `<div class="detail-row">
             <span class="detail-key">Parent</span>
@@ -608,7 +813,6 @@ function showDetailPanel(entity) {
         </div>`;
     }
 
-    // Children
     if (entity.children && entity.children.length > 0) {
         html += `<div class="detail-row">
             <span class="detail-key">Children</span>
@@ -616,7 +820,6 @@ function showDetailPanel(entity) {
         </div>`;
     }
 
-    // Metrics
     const m = entity.metrics || {};
     const metricKeys = Object.keys(m);
     if (metricKeys.length > 0) {
@@ -638,7 +841,6 @@ function showDetailPanel(entity) {
         html += `</div>`;
     }
 
-    // Labels
     const labels = entity.labels || {};
     if (Object.keys(labels).length > 0) {
         html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #374151;">
@@ -672,8 +874,8 @@ document.getElementById('detail-close').addEventListener('click', () => {
 function buildToolbar() {
     const toolbar = document.getElementById('toolbar');
 
-    const metaphorOptions = availableMetaphors.map(m =>
-        `<option value="${m.id}" ${m.id === currentMetaphor ? 'selected' : ''}>${m.name}</option>`
+    const metaphorOptions = availableMetaphors.map((m, i) =>
+        `<option value="${m.id}" ${m.id === currentMetaphor ? 'selected' : ''}>${i + 1}. ${m.name}</option>`
     ).join('');
 
     const currentMeta = availableMetaphors.find(m => m.id === currentMetaphor);
@@ -686,19 +888,14 @@ function buildToolbar() {
             <label style="font-size:11px;color:#9ca3af;display:block;margin-bottom:2px;">Renderer</label>
             <select id="metaphor-select">${metaphorOptions}</select>
             <div id="stats" style="margin-top:8px;font-size:11px;color:#6b7280;"></div>
-            <div style="margin-top:6px;font-size:10px;color:#4b5563;">
-                Scroll to zoom · Shift+drag to pan
+            <div class="shortcut-hint">
+                <kbd>1</kbd>-<kbd>9</kbd> metaphor &middot; <kbd>+</kbd><kbd>-</kbd> zoom &middot; <kbd>&uarr;&darr;&larr;&rarr;</kbd> pan &middot; <kbd>Esc</kbd> deselect
             </div>
         </div>
     `;
 
     document.getElementById('metaphor-select').addEventListener('change', (e) => {
-        currentMetaphor = e.target.value;
-        // Update description
-        const meta = availableMetaphors.find(m => m.id === currentMetaphor);
-        const descEl = toolbar.querySelector('div[style*="font-size:11px;color:#6b7280"]');
-        if (descEl && meta) descEl.textContent = meta.description;
-        render();
+        switchMetaphor(e.target.value);
     });
 }
 
