@@ -10,13 +10,15 @@ from engine.sources.mock import MockSource
 from engine.sources.processes import ProcessSource
 from engine.metaphors import MetaphorRegistry
 from engine.metaphors.city import CityRenderer
+from engine.metaphors.traffic_light import TrafficLightRenderer
 
 app = FastAPI(title="Metaphors", version="0.1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Metaphor registry — register city metaphor on startup
+# Metaphor registry — register metaphors on startup
 registry = MetaphorRegistry()
 registry.register("city", CityRenderer())
+registry.register("traffic_light", TrafficLightRenderer())
 active_metaphor = "city"
 
 # Scheduler with both mock and live process sources
@@ -45,6 +47,7 @@ async def list_metaphors():
         "city": "Infrastructure as a cityscape",
         "solar": "Systems as orbiting celestial bodies",
         "forest": "Services as a living forest ecosystem",
+        "traffic_light": "Infrastructure as traffic signals at an intersection",
     }
     for name in names:
         metaphor_info.append({
