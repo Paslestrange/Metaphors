@@ -349,7 +349,20 @@ def main():
     merge_task(task)
 
     # Complete
-    summary = f"Done: {title}. Plan → Implement → Review → Merge complete."
+    # Generate feature summary from git diff
+    diff_stat, _, _ = run("git diff HEAD~1 --stat", workdir=WORKSPACE)
+    diff_names, _, _ = run("git diff HEAD~1 --name-only", workdir=WORKSPACE)
+    files_changed = [f.strip() for f in diff_names.splitlines() if f.strip()]
+
+    summary = f"**✅ Task Complete: {title}**\n\n"
+    summary += f"**Workflow:** Plan → Implement → Review ({fix_round + 1} round{'s' if fix_round > 0 else ''}) → Merge\n\n"
+    summary += "**Files changed:**\n"
+    for f in files_changed[:10]:
+        summary += f"• `{f}`\n"
+    if len(files_changed) > 10:
+        summary += f"• ... and {len(files_changed) - 10} more\n"
+    summary += f"\n**Stats:** {diff_stat.splitlines()[-1] if diff_stat else 'changes made'}"
+
     complete_task(task_id, summary)
     log(f"Task completed: {title}")
 
