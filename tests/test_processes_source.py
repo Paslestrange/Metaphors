@@ -5,6 +5,7 @@ TDD: tests define the contract before implementation.
 import pytest
 import psutil
 from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
 
 from engine.entities import EntityType, EntityState
 from engine.sources.processes import ProcessSource
@@ -113,40 +114,43 @@ class TestProcessSourceFetch:
         assert cpus == sorted(cpus, reverse=True)
 
 
+def _setup_psutil_mock(mock_psutil, procs):
+    """Helper to configure common psutil mock attributes."""
+    mock_psutil.process_iter.return_value = procs
+    mock_psutil.cpu_count.return_value = 4
+    mock_psutil.virtual_memory.return_value = SimpleNamespace(
+        total=16 * 1024 * 1024 * 1024, percent=45.0
+    )
+    # Use real exception classes so except clauses work
+    mock_psutil.NoSuchProcess = psutil.NoSuchProcess
+    mock_psutil.AccessDenied = psutil.AccessDenied
+    mock_psutil.ZombieProcess = psutil.ZombieProcess
+
+
 class TestProcessSourceMocked:
     """Test grouping logic with mocked psutil data."""
 
     def _make_mock_procs(self):
-        """Create mock process objects for deterministic testing.
-        
-        process_iter(attrs=[...]) returns objects with .info dict.
-        """
+        """Create mock process objects with .info dicts (matching process_iter attrs mode)."""
         procs = []
-        # 3 python processes
-        for pid in [100, 200, 300]:
-            p = MagicMock()
-            p.info = {
+        for pid, name, cpu, mem in [
+            (100, "python3", 10.0, 2.5),
+            (200, "python3", 10.0, 2.5),
+            (300, "python3", 10.0, 2.5),
+            (400, "nginx", 50.0, 1.0),
+        ]:
+            p = SimpleNamespace(info={
                 "pid": pid,
-                "name": "python3",
-                "cpu_percent": 10.0,
-                "memory_percent": 2.5,
-            }
+                "name": name,
+                "cpu_percent": cpu,
+                "memory_percent": mem,
+            })
             procs.append(p)
-        # 1 nginx process
-        p = MagicMock()
-        p.info = {
-            "pid": 400,
-            "name": "nginx",
-            "cpu_percent": 50.0,
-            "memory_percent": 1.0,
-        }
-        procs.append(p)
         return procs
 
     @patch("engine.sources.processes.psutil")
     def test_groups_by_name(self, mock_psutil):
-        mock_psutil.process_iter.return_value = self._make_mock_procs()
-        mock_psutil.cpu_count.return_value = 4
+        _setup_psutil_mock(mock_psutil, self._make_mock_procs())
 
         source = ProcessSource()
         entities = source.fetch()
@@ -158,8 +162,7 @@ class TestProcessSourceMocked:
 
     @patch("engine.sources.processes.psutil")
     def test_aggregated_metrics(self, mock_psutil):
-        mock_psutil.process_iter.return_value = self._make_mock_procs()
-        mock_psutil.cpu_count.return_value = 4
+        _setup_psutil_mock(mock_psutil, self._make_mock_procs())
 
         source = ProcessSource()
         entities = source.fetch()
@@ -172,19 +175,16 @@ class TestProcessSourceMocked:
     @patch("engine.sources.processes.psutil")
     def test_handles_zombie_process(self, mock_psutil):
         """Zombie/dead processes during iteration are skipped gracefully."""
-        good_procs = self._make_mock_procs()[:1]  # just the first python3
+        good_procs = self._make_mock_procs()[:1]
 
         class ZombieProc:
             @property
             def info(self):
                 raise psutil.NoSuchProcess(pid=999)
 
-        import psutil as real_psutil
-        mock_psutil.NoSuchProcess = real_psutil.NoSuchProcess
-        mock_psutil.process_iter.return_value = good_procs + [ZombieProc()]
-        mock_psutil.cpu_count.return_value = 4
+        _setup_psutil_mock(mock_psutil, good_procs + [ZombieProc()])
 
         source = ProcessSource()
         entities = source.fetch()
-        # Should not crash, should still return entities (root + 1 process)
+        # Should not crash — root + 1 good process
         assert len(entities) >= 2
