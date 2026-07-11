@@ -10,6 +10,18 @@
     <div id="app">
         <canvas id="canvas"></canvas>
         <div id="toolbar"></div>
+        <div id="zoom-controls">
+            <button id="zoom-in" title="Zoom In">+</button>
+            <button id="zoom-reset" title="Reset View">⌂</button>
+            <button id="zoom-out" title="Zoom Out">−</button>
+        </div>
+        <div id="detail-panel" class="hidden">
+            <div id="detail-header">
+                <span id="detail-title"></span>
+                <button id="detail-close">&times;</button>
+            </div>
+            <div id="detail-body"></div>
+        </div>
     </div>
     <script src="/static/main.js"></script>
 </body>

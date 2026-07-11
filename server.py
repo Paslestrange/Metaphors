@@ -20,6 +20,18 @@ async def index():
 async def health():
     return {"status": "ok"}
 
+@app.get("/api/metaphors")
+async def list_metaphors():
+    """Return available metaphor renderers."""
+    return {
+        "metaphors": [
+            {"id": "city", "name": "City", "description": "Clusters as districts, services as buildings"},
+            {"id": "solar", "name": "Solar System", "description": "Entities as orbiting planets"},
+            {"id": "forest", "name": "Forest", "description": "Entities as growing trees"},
+        ],
+        "default": "city",
+    }
+
 @app.websocket("/ws/entities")
 async def ws_entities(websocket: WebSocket):
     await websocket.accept()
