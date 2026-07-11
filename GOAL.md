@@ -114,9 +114,39 @@ Each metaphor must satisfy three criteria:
 
 ## How We Work
 
-- **Hermes** handles planning, architecture decisions, code review, and orchestration
-- **agy (Antigravity)** handles implementation tasks (coding, file creation, test writing)
-- **Cronjob** drives steady progress: one task per cycle, every few hours
+### Task Workflow (5 Phases)
+
+Every kanban task goes through this cycle:
+
+```
+PLAN → IMPLEMENT → REVIEW → (fix loop) → MERGE
+```
+
+| Phase | Agent | What Happens |
+|-------|-------|--------------|
+| **1. Plan** | Hermes | Analyzes task, reads codebase, creates implementation plan with file paths, test strategy, decisions |
+| **2. Implement** | agy | Writes code following the plan. TDD: tests first, then implementation. Commits. |
+| **3. Review** | Hermes | Reviews diff against plan. Checks correctness, test coverage, code quality, security. Verdict: PASS or FAIL |
+| **4. Fix** | agy | If review FAILs, agy fixes the listed issues. Loops back to review (max 2 rounds). |
+| **5. Merge** | Worker | Squash commits, clean up, mark task done |
+
+### Review Loop
+
+```
+┌─────────────────────────────────────────────┐
+│                                             │
+▼                                             │
+IMPLEMENT ──→ REVIEW ──→ PASS ──→ MERGE       │
+                │                             │
+                └──→ FAIL ──→ FIX ────────────┘
+                              (max 2 rounds)
+```
+
+### Toolchain
+
+- **Hermes** handles planning, code review, and orchestration (Qwen3.7 Plus)
+- **agy (Antigravity)** handles implementation tasks (Gemini-powered)
+- **Cronjob** drives steady progress: one task per cycle, every 4 hours
 - **Kanban** tracks all work items and their status
 - **TDD** for all code — test first, then implement
-- **Conservative usage** — one task per cron cycle, no parallel agents, no rapid-fire prompts
+- **Conservative usage** — one task per cron cycle, ~6 tasks/day max
