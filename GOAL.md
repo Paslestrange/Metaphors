@@ -119,16 +119,18 @@ Each metaphor must satisfy three criteria:
 Every kanban task goes through this cycle:
 
 ```
-PLAN → IMPLEMENT → REVIEW → (fix loop) → MERGE
+BRANCH → PLAN → IMPLEMENT → REVIEW → (fix loop) → MERGE → DELETE BRANCH
 ```
 
 | Phase | Agent | What Happens |
 |-------|-------|--------------|
-| **1. Plan** | Hermes | Analyzes task, reads codebase, creates implementation plan with file paths, test strategy, decisions |
-| **2. Implement** | agy | Writes code following the plan. TDD: tests first, then implementation. Commits. |
-| **3. Review** | Hermes | Reviews diff against plan. Checks correctness, test coverage, code quality, security. Verdict: PASS or FAIL |
-| **4. Fix** | agy | If review FAILs, agy fixes the listed issues. Loops back to review (max 2 rounds). |
-| **5. Merge** | Worker | Squash commits, clean up, mark task done |
+| **1. Branch** | Worker | Creates `task/<id>-<slug>` branch from `main` |
+| **2. Plan** | Hermes | Analyzes task, reads codebase, creates implementation plan |
+| **3. Implement** | agy | TDD: tests first, then code on feature branch. Commits to branch. |
+| **4. Review** | Hermes | Reviews branch diff vs main. Verdict: PASS or FAIL |
+| **5. Fix** | agy | If FAIL: fixes on branch, loops back to review (max 2 rounds) |
+| **6. Merge** | Worker | Squash merge branch → main, delete branch |
+| **7. Notify** | Worker | Posts summary to Discord |
 
 ### Review Loop
 
@@ -136,13 +138,27 @@ PLAN → IMPLEMENT → REVIEW → (fix loop) → MERGE
 ┌─────────────────────────────────────────────┐
 │                                             │
 ▼                                             │
-IMPLEMENT ──→ REVIEW ──→ PASS ──→ MERGE       │
+IMPLEMENT ──→ REVIEW ──→ PASS ──→ MERGE MAIN  │
                 │                             │
                 └──→ FAIL ──→ FIX ────────────┘
                               (max 2 rounds)
 ```
 
-### Toolchain
+### Git Workflow
+
+```
+main ───────────────────────────────────────────── (clean)
+  │
+  └─→ task/t_abc1-my-feature ──→ plan ──→ implement ──→ review ──→ fix
+                                                       │
+                                                       ▼
+main ←────────────────────── squash merge ←──────── PASS
+```
+
+- Each task gets its own feature branch: `task/<short-id>-<slug>`
+- All work happens on the branch (never directly on main)
+- Review compares branch diff against main
+**Toolchain**
 
 - **Hermes** handles planning, code review, and orchestration (Qwen3.7 Plus)
 - **agy (Antigravity)** handles implementation tasks (Gemini-powered)
