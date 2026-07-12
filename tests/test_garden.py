@@ -69,7 +69,11 @@ class TestGardenRendererLayout:
              "name": "G", "state": "healthy", "metrics": {}},
         ]
         r.compute_layout(entities, 800, 600)
-        assert r.hit_test({"id": "c1"}, 100, 100) is True
+        # Garden bed starts at y=150 (25% sky), so test a point inside it
+        layout = r._layout
+        cx = layout["c1"]["x"] + layout["c1"]["w"] / 2
+        cy = layout["c1"]["y"] + layout["c1"]["h"] / 2
+        assert r.hit_test({"id": "c1"}, int(cx), int(cy)) is True
         assert r.hit_test({"id": "c1"}, 9999, 9999) is False
 
     def test_hit_test_missing_entity(self):
