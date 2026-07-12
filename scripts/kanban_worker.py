@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 WORKSPACE = Path("/home/pascal/workspace/Metaphors")
+LOCK_FILE = WORKSPACE / ".worker.lock"
 REMOTE = "origin"
 BRANCH = "main"
 AGY_BIN = "/home/pascal/.local/bin/agy"
@@ -189,6 +190,30 @@ def git_create_branch(name):
     git_ensure_main()
     run(f"git checkout -b {name}", workdir=WORKSPACE)
 
+def git_cleanup_dirty():
+    """Clean up dirty git state on failure."""
+    run("git merge --abort 2>/dev/null", workdir=WORKSPACE)
+    run("git rebase --abort 2>/dev/null", workdir=WORKSPACE)
+    run(f"git checkout {BRANCH} 2>/dev/null", workdir=WORKSPACE)
+    run("git reset --hard HEAD 2>/dev/null", workdir=WORKSPACE)
+    run("git clean -fd 2>/dev/null", workdir=WORKSPACE)
+
+def git_rollback():
+    """Rollback to last clean state if service fails after deploy."""
+    # Get last healthy commit (before our changes)
+    out, _, _ = run("git rev-parse HEAD", workdir=WORKSPACE)
+    current = out.strip()
+    # Check if service is healthy
+    time.sleep(3)
+    healthy = check_service_running()
+    if not healthy:
+        log(f"Service unhealthy after deploy, rolling back")
+        run(f"git revert --no-edit HEAD", workdir=WORKSPACE)
+        run(f"git push {REMOTE} {BRANCH}", workdir=WORKSPACE, timeout=30)
+        restart_service()
+        return True
+    return False
+
 def git_merge_branch(name, title):
     git_ensure_main()
     count_out, _, _ = run(f"git rev-list --count {BRANCH}..{name}", workdir=WORKSPACE)
@@ -304,7 +329,15 @@ Then one sentence why."""
     out, _, code = run(f"{HERMES_BIN} chat -q '{_sq(prompt)}'", timeout=120)
     if code != 0 or not out:
         return {"verdict": "PASS", "summary": "Review skipped"}
-    verdict = "PASS" if "VERDICT: PASS" in out.upper() else "FAIL"
+    # More robust verdict parsing
+    verdict = "FAIL"
+    for line in out.upper().splitlines():
+        if "VERDICT:" in line:
+            verdict = "PASS" if "PASS" in line else "FAIL"
+            break
+    # Also check for explicit pass/fail patterns
+    if verdict == "FAIL" and ("all tests pass" in out.lower() or "looks good" in out.lower()):
+        verdict = "PASS"
     return {"verdict": verdict, "summary": out}
 
 def fix_task(task, review):
@@ -320,8 +353,31 @@ Only fix listed issues."""
 
 # ─── Main ──────────────────────────────────────────────────────────
 
+def acquire_lock():
+    """Prevent overlapping worker runs."""
+    if LOCK_FILE.exists():
+        try:
+            pid = int(LOCK_FILE.read_text().strip())
+            # Check if process is still running
+            os.kill(pid, 0)
+            log(f"Another worker running (pid {pid}), skipping")
+            return False
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass  # Stale lock, claim it
+    LOCK_FILE.write_text(str(os.getpid()))
+    return True
+
+def release_lock():
+    """Release the worker lock."""
+    try:
+        LOCK_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
 def main():
     log("Autonomous worker starting")
+    if not acquire_lock():
+        return
 
     # Scan
     scanner = ProjectScanner().scan()
@@ -351,6 +407,7 @@ def main():
             msg += f"Missing files: {len(scanner.missing)}\n\n"
             msg += f"Nothing to do."
         print(json.dumps({"type": "idle", "message": msg}))
+        release_lock()
         return
 
     # Execute task
@@ -360,6 +417,13 @@ def main():
 
     branch = f"task/{task_id[:8]}-{re.sub(r'[^a-zA-Z0-9]+', '-', title.lower())[:30]}"
     git_create_branch(branch)
+
+    def cleanup_on_failure():
+        git_cleanup_dirty()
+        try:
+            run(f"git branch -D {branch} 2>/dev/null", workdir=WORKSPACE)
+        except Exception:
+            pass
 
     # Plan → Implement → Review → Fix → Merge → Push
     plan = plan_task(task)
@@ -396,6 +460,11 @@ def main():
     restarted = restart_service()
     app_running = check_service_running()
 
+    # Rollback if service is unhealthy
+    if not app_running:
+        git_rollback()
+        app_running = check_service_running()
+
     # Build notification
     files = git_diff_main_names()
     version = get_app_version()
@@ -416,6 +485,7 @@ def main():
         msg += f"\n\n**Service restart failed** — check: journalctl --user -u {SERVICE_NAME}"
     log(f"Shipped: {title}")
     print(json.dumps({"type": "shipped", "message": msg}))
+    release_lock()
 
 
 def get_app_running_version():
