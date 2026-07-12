@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Metaphors kanban worker — autonomous project builder.
+"""Metaphors autonomous worker — robot colleague edition.
 
-Smart workflow:
-  1. SCAN project state (files, tests, docs, config)
-  2. COMPARE against GOAL.md and plan
-  3. IDENTIFY gaps (missing files, failing tests, incomplete features)
-  4. CREATE tasks for gaps (if none exist)
-  5. PICK next ready task
-  6. EXECUTE: plan → implement → review → fix → merge
-  7. NOTIFY via Discord
+Self-directing project builder. Scans, identifies gaps, creates tasks,
+executes them, pushes to remote. Minimal Discord output — only speaks
+when shipping features or when truly blocked.
 
-Run by cron every 4 hours. Self-directing — creates its own work.
+Workflow:
+  1. SCAN project state
+  2. If tests failing → auto-create fix task, execute it
+  3. If gaps found → auto-create tasks (max 2/cycle)
+  4. Pick next ready task → plan → implement → review → fix → merge → push
+  5. Only notify Discord on: feature shipped, or idle (no work at all)
 """
 import json
 import subprocess
@@ -21,10 +21,13 @@ import re
 from pathlib import Path
 
 WORKSPACE = Path("/home/pascal/workspace/Metaphors")
+REMOTE = "origin"
+BRANCH = "main"
 AGY_BIN = "/home/pascal/.local/bin/agy"
 HERMES_BIN = os.path.expanduser("~/.local/bin/hermes")
 TIMEOUT = 600
 MAX_FIX_ROUNDS = 2
+APP_PORT = 8080
 
 # ─── Helpers ───────────────────────────────────────────────────────
 
@@ -44,235 +47,150 @@ def _sq(s):
 # ─── Project Scanner ───────────────────────────────────────────────
 
 class ProjectScanner:
-    """Scans project state and identifies gaps."""
-
-    # Expected structure for a complete project
     REQUIRED_FILES = {
-        # Core
-        "server.py": "FastAPI server with WebSocket",
-        "requirements.txt": "Python dependencies",
-        "pyproject.toml": "Modern Python packaging",
-        "Makefile": "Build/run targets",
-        "install.sh": "One-command setup",
-        "README.md": "Project introduction",
+        "server.py": "FastAPI server",
+        "requirements.txt": "Dependencies",
+        "pyproject.toml": "Python packaging",
+        "Makefile": "Build targets",
+        "install.sh": "Install script",
+        "README.md": "Documentation",
         "CONTRIBUTING.md": "Contribution guide",
-        "LICENSE": "Open source license",
-        ".gitignore": "Git ignore rules",
-        ".env.example": "Environment variables template",
-
-        # Engine
+        "LICENSE": "License",
+        ".gitignore": "Git ignore",
+        ".env.example": "Env template",
         "engine/__init__.py": "Engine package",
-        "engine/entities.py": "Unified entity model",
-        "engine/scheduler.py": "Real-time entity stream",
-
-        # Data Sources
+        "engine/entities.py": "Entity model",
+        "engine/scheduler.py": "Scheduler",
         "engine/sources/__init__.py": "Sources package",
         "engine/sources/base.py": "DataSource ABC",
-        "engine/sources/mock.py": "Mock data source",
-        "engine/sources/processes.py": "System process source",
-
-        # Metaphors
+        "engine/sources/mock.py": "Mock source",
+        "engine/sources/processes.py": "Process source",
         "engine/metaphors/__init__.py": "Metaphors package",
-        "engine/metaphors/base.py": "MetaphorRenderer ABC + registry",
+        "engine/metaphors/base.py": "MetaphorRenderer ABC",
         "engine/metaphors/city.py": "City metaphor",
-        "engine/metaphors/space.py": "Space station metaphor",
+        "engine/metaphors/space.py": "Space metaphor",
         "engine/metaphors/factory.py": "Factory metaphor",
         "engine/metaphors/garden.py": "Garden metaphor",
         "engine/metaphors/kitchen.py": "Kitchen metaphor",
-        "engine/metaphors/ship.py": "Naval ship metaphor",
-        "engine/metaphors/solar.py": "Solar system metaphor",
+        "engine/metaphors/ship.py": "Ship metaphor",
+        "engine/metaphors/solar.py": "Solar metaphor",
         "engine/metaphors/orchestra.py": "Orchestra metaphor",
         "engine/metaphors/construction.py": "Construction metaphor",
-
-        # Frontend
-        "static/index.html": "Main HTML page",
-        "static/main.js": "Frontend rendering",
-        "static/style.css": "Styles",
-
-        # Tests
+        "static/index.html": "Frontend HTML",
+        "static/main.js": "Frontend JS",
+        "static/style.css": "Frontend CSS",
         "tests/__init__.py": "Tests package",
-        "tests/test_entities.py": "Entity model tests",
-        "tests/test_sources.py": "Data source tests",
-        "tests/test_city.py": "City metaphor tests",
+        "tests/test_entities.py": "Entity tests",
+        "tests/test_sources.py": "Source tests",
+        "tests/test_city.py": "City tests",
         "tests/test_integration.py": "Integration tests",
-
-        # Docs
-        "docs/custom-metaphor.md": "Custom metaphor tutorial",
-        "docs/custom-data-source.md": "Custom data source tutorial",
-
-        # Deployment
-        "Dockerfile": "Container image",
-        "docker-compose.yml": "Container orchestration",
-        ".dockerignore": "Docker ignore rules",
-
-        # CI
+        "docs/custom-metaphor.md": "Metaphor tutorial",
+        "docs/custom-data-source.md": "Data source tutorial",
+        "Dockerfile": "Docker image",
+        "docker-compose.yml": "Docker Compose",
+        ".dockerignore": "Docker ignore",
         ".github/workflows/ci.yml": "CI pipeline",
     }
 
     def __init__(self):
         self.existing = set()
         self.missing = {}
-        self.test_results = {}
-        self.server_runs = False
+        self.tests_pass = False
+        self.test_summary = ""
+        self.server_ok = False
 
     def scan(self):
-        """Full project scan."""
-        log("Scanning project state...")
-
-        # Find existing files
         for root, dirs, files in os.walk(WORKSPACE):
-            # Skip venv, __pycache__, .git
             dirs[:] = [d for d in dirs if d not in ('.venv', '__pycache__', '.git', '.hermes', 'node_modules')]
             for f in files:
-                rel = os.path.relpath(os.path.join(root, f), WORKSPACE)
-                self.existing.add(rel)
+                self.existing.add(os.path.relpath(os.path.join(root, f), WORKSPACE))
 
-        # Identify missing files
-        self.missing = {}
-        for path, desc in self.REQUIRED_FILES.items():
-            if path not in self.existing:
-                self.missing[path] = desc
-
-        # Check if tests pass
-        self._run_tests()
-
-        # Check if server starts
+        self.missing = {p: d for p, d in self.REQUIRED_FILES.items() if p not in self.existing}
+        self._check_tests()
         self._check_server()
-
-        log(f"Scan complete: {len(self.existing)} files exist, {len(self.missing)} missing")
         return self
 
-    def _run_tests(self):
-        """Run pytest and capture results."""
-        output, _, code = run("python3 -m pytest tests/ -v --tb=short 2>&1", timeout=120)
-        self.test_results = {
-            "output": output,
-            "passed": "passed" in output,
-            "exit_code": code,
-            "summary": self._parse_test_summary(output),
-        }
-
-    def _parse_test_summary(self, output):
-        """Extract test summary from pytest output."""
-        for line in output.splitlines():
+    def _check_tests(self):
+        out, _, code = run("python3 -m pytest tests/ -v --tb=short 2>&1", timeout=120)
+        self.tests_pass = code == 0
+        for line in out.splitlines():
             if "passed" in line or "failed" in line:
-                return line.strip()
-        return "No tests found"
+                self.test_summary = line.strip()
+                break
 
     def _check_server(self):
-        """Check if server can start."""
-        # Just check imports work
-        output, _, code = run("python3 -c 'from engine.entities import Entity; print(\"OK\")'", timeout=10)
-        self.server_runs = code == 0 and "OK" in output
+        out, _, code = run("python3 -c 'from engine.entities import Entity; print(\"OK\")'", timeout=10)
+        self.server_ok = code == 0 and "OK" in out
 
-    def get_gaps(self):
-        """Return prioritized list of gaps."""
-        gaps = []
-
-        # Missing critical files
-        for path, desc in self.missing.items():
-            priority = "high"
-            if path in ("README.md", "CONTRIBUTING.md", "LICENSE"):
-                priority = "medium"
-            if path.startswith(".github/"):
-                priority = "low"
-            gaps.append({
-                "type": "missing_file",
-                "path": path,
-                "description": desc,
-                "priority": priority,
-            })
-
-        # Failing tests
-        if self.test_results.get("exit_code", 0) != 0:
-            gaps.append({
-                "type": "failing_tests",
-                "description": f"Tests failing: {self.test_results.get('summary', 'unknown')}",
-                "priority": "high",
-            })
-
-        # Server won't start
-        if not self.server_runs:
-            gaps.append({
-                "type": "server_broken",
-                "description": "Server imports fail",
-                "priority": "critical",
-            })
-
-        return gaps
-
-    def get_status_message(self):
-        """Return a human-readable status."""
-        lines = [
-            f"📁 Files: {len(self.existing)} exist, {len(self.missing)} missing",
-            f"🧪 Tests: {self.test_results.get('summary', 'not run')}",
-            f"🖥️ Server: {'OK' if self.server_runs else 'BROKEN'}",
-        ]
-        if self.missing:
-            lines.append(f"\n❌ Missing {len(self.missing)} files:")
-            for path in sorted(self.missing.keys())[:5]:
-                lines.append(f"  • {path}")
-            if len(self.missing) > 5:
-                lines.append(f"  • ... and {len(self.missing) - 5} more")
-        return "\n".join(lines)
-
+    def has_critical_gaps(self):
+        return bool(self.missing) or not self.tests_pass or not self.server_ok
 
 # ─── Task Creator ──────────────────────────────────────────────────
 
-def create_tasks_for_gaps(gaps):
-    """Create kanban tasks for identified gaps."""
+def existing_tasks():
+    out, _, _ = run("hermes kanban list --json 2>/dev/null")
+    try:
+        return json.loads(out)
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+def task_exists(title):
+    return any(t["title"] == title for t in existing_tasks())
+
+def create_task(title, body):
+    if task_exists(title):
+        return False
+    run(f'hermes kanban create "{_sq(title)}" --assignee default --body "{_sq(body)}"')
+    return True
+
+def auto_create_tasks(scanner):
+    """Create tasks for gaps. Max 2 per cycle."""
     created = 0
-    for gap in gaps[:3]:  # Max 3 new tasks per cycle
-        path = gap.get("path", "")
-        desc = gap.get("description", "")
 
-        if gap["type"] == "missing_file":
-            title = f"Create {path}"
-            body = f"Create the missing file: {path}\n\nPurpose: {desc}\n\nFollow existing code patterns. Write tests if applicable. Commit with descriptive message."
-        elif gap["type"] == "failing_tests":
-            title = "Fix failing tests"
-            body = f"Tests are failing. Run: python3 -m pytest tests/ -v\n\nFix all failing tests. Ensure all pass before committing."
-        elif gap["type"] == "server_broken":
-            title = "Fix server imports"
-            body = "Server fails to import. Check engine/ imports, fix circular dependencies, ensure all modules load."
-        else:
-            continue
-
-        # Check if similar task already exists
-        output, _, _ = run("hermes kanban list --json 2>/dev/null")
-        try:
-            existing = json.loads(output)
-            if any(t["title"] == title for t in existing):
-                continue
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-        # Create task
-        run(f'hermes kanban create "{_sq(title)}" --assignee default --body "{_sq(body)}"')
+    # Priority 1: Failing tests
+    if not scanner.tests_pass and not task_exists("Fix failing tests"):
+        create_task(
+            "Fix failing tests",
+            f"Tests are failing: {scanner.test_summary}\n\n"
+            f"Run: cd {WORKSPACE} && python3 -m pytest tests/ -v\n"
+            f"Fix all failures. Ensure 100% pass rate."
+        )
         created += 1
-        log(f"Created task: {title}")
+
+    # Priority 2: Server broken
+    if not scanner.server_ok and not task_exists("Fix server imports"):
+        create_task(
+            "Fix server imports",
+            "Server fails to import. Check engine/ modules, fix dependencies."
+        )
+        created += 1
+
+    # Priority 3: Missing files (max 1 per cycle)
+    if created < 2:
+        for path, desc in sorted(scanner.missing.items()):
+            if created >= 2:
+                break
+            title = f"Create {path}"
+            if not task_exists(title):
+                create_task(title, f"Create missing file: {path}\n\nPurpose: {desc}")
+                created += 1
+                break  # Only 1 missing file task per cycle
 
     return created
 
-
 # ─── Git Operations ────────────────────────────────────────────────
 
-def task_branch_name(task_id, title):
-    slug = re.sub(r'[^a-zA-Z0-9]+', '-', title.lower())[:40].rstrip('-')
-    short_id = task_id[:8] if task_id else "unknown"
-    return f"task/{short_id}-{slug}"
-
 def git_ensure_main():
-    run("git checkout main", workdir=WORKSPACE)
-    run("git pull --rebase origin main 2>/dev/null || true", workdir=WORKSPACE)
+    run(f"git checkout {BRANCH}", workdir=WORKSPACE)
+    run(f"git pull --rebase {REMOTE} {BRANCH} 2>/dev/null || true", workdir=WORKSPACE)
 
-def git_create_branch(branch_name):
+def git_create_branch(name):
     git_ensure_main()
-    run(f"git checkout -b {branch_name}", workdir=WORKSPACE)
+    run(f"git checkout -b {name}", workdir=WORKSPACE)
 
-def git_merge_branch(branch_name, title):
+def git_merge_branch(name, title):
     git_ensure_main()
-    count_out, _, _ = run(f"git rev-list --count main..{branch_name}", workdir=WORKSPACE)
+    count_out, _, _ = run(f"git rev-list --count {BRANCH}..{name}", workdir=WORKSPACE)
     try:
         count = int(count_out)
     except ValueError:
@@ -280,231 +198,207 @@ def git_merge_branch(branch_name, title):
     if count == 0:
         return False
     safe_title = re.sub(r'[^a-zA-Z0-9 ]', '', title)[:60]
-    run(f'git merge --squash {branch_name}', workdir=WORKSPACE)
+    run(f'git merge --squash {name}', workdir=WORKSPACE)
     run(f'git commit -m "feat: {safe_title}"', workdir=WORKSPACE)
-    run(f"git branch -D {branch_name}", workdir=WORKSPACE)
+    run(f"git branch -D {name}", workdir=WORKSPACE)
     return True
 
+def git_push():
+    """Push main to remote."""
+    _, stderr, code = run(f"git push {REMOTE} {BRANCH}", workdir=WORKSPACE, timeout=30)
+    if code == 0:
+        log("Pushed to remote")
+        return True
+    else:
+        log(f"Push failed: {stderr[:200]}")
+        return False
+
 def git_diff_main_names():
-    names, _, _ = run("git diff main...HEAD --name-only", workdir=WORKSPACE)
+    names, _, _ = run(f"git diff {BRANCH}...HEAD --name-only", workdir=WORKSPACE)
     return [f.strip() for f in names.splitlines() if f.strip()]
 
-def git_diff_main_stat():
-    stat, _, _ = run("git diff main...HEAD --stat", workdir=WORKSPACE)
-    return stat
+# ─── App Status ────────────────────────────────────────────────────
 
+def check_app_running():
+    """Check if the app is running on the expected port."""
+    out, _, _ = run(f"curl -s http://localhost:{APP_PORT}/health 2>/dev/null")
+    return '"status":"ok"' in out or '"status": "ok"' in out
+
+def get_app_version():
+    """Get the latest commit hash as version."""
+    out, _, _ = run("git rev-parse --short HEAD", workdir=WORKSPACE)
+    return out or "unknown"
 
 # ─── Kanban Operations ─────────────────────────────────────────────
 
 def get_next_task():
-    output, _, code = run("hermes kanban list --json 2>/dev/null")
-    if code != 0 or not output:
+    out, _, code = run("hermes kanban list --json 2>/dev/null")
+    if code != 0 or not out:
         return None
     try:
-        tasks = json.loads(output)
+        tasks = json.loads(out)
     except json.JSONDecodeError:
         return None
-    for task in tasks:
-        if task.get("state") == "ready":
-            return task
+    for t in tasks:
+        if t.get("state") == "ready":
+            return t
     return None
-
-def claim_task(task_id):
-    run(f"hermes kanban start {task_id}")
-
-def complete_task(task_id, summary):
-    metadata = json.dumps({"agent": "agy", "workflow": "autonomous"})
-    run(f"hermes kanban done {task_id} --summary '{_sq(summary[:500])}' --metadata '{metadata}'")
-
-def block_task(task_id, reason):
-    run(f"hermes kanban block {task_id} '{_sq(reason[:500])}'")
-
-def comment_task(task_id, body):
-    run(f"hermes kanban comment {task_id} '{_sq(body[:500])}'")
-
 
 # ─── Execution Phases ──────────────────────────────────────────────
 
 def plan_task(task):
-    title = task["title"]
-    body = task.get("body", "")
-    prompt = f"""You are planning an implementation task for the Metaphors project.
+    prompt = f"""Plan this task for the Metaphors project at {WORKSPACE}.
 
-PROJECT: {WORKSPACE}
-TASK: {title}
-DESCRIPTION: {body}
+Task: {task['title']}
+Description: {task.get('body', '')}
 
-Create a concise implementation plan. Do NOT write code.
-Output: FILES TO CREATE/MODIFY, KEY DECISIONS, TEST STRATEGY, DEPENDENCIES.
-Under 500 words. Exact file paths."""
-    stdout, _, code = run(f"{HERMES_BIN} chat -q '{_sq(prompt)}'", timeout=120)
-    return stdout if code == 0 and stdout else None
+Create a brief implementation plan: files to change, key decisions, test strategy.
+Do NOT write code. Under 300 words. Exact file paths."""
+    out, _, code = run(f"{HERMES_BIN} chat -q '{_sq(prompt)}'", timeout=120)
+    return out if code == 0 and out else None
 
 def implement_task(task, plan):
-    title = task["title"]
-    body = task.get("body", "")
-    prompt = f"""You are implementing a task for the Metaphors project.
+    prompt = f"""Implement this task for the Metaphors project at {WORKSPACE}.
 
-PROJECT: {WORKSPACE}
-TASK: {title}
-DESCRIPTION: {body}
+Task: {task['title']}
+Description: {task.get('body', '')}
+Plan: {plan}
 
-PLAN: {plan}
-
-INSTRUCTIONS:
 1. Read existing code for context
-2. TDD: tests FIRST, verify fail, implement, verify pass
+2. TDD: tests first, verify fail, implement, verify pass
 3. Run: cd {WORKSPACE} && python3 -m pytest tests/ -v
 4. Commit with descriptive message
 
-CONSTRAINTS:
-- Do NOT modify files outside {WORKSPACE}
-- Do NOT install packages (add to requirements.txt only)
-- Use python3 for all commands"""
-    stdout, stderr, code = run(f"{AGY_BIN} --print-timeout 10m --print '{_sq(prompt)}'", timeout=TIMEOUT)
-    return {"output": stdout or "", "errors": stderr or "", "success": code == 0}
+Do NOT install packages or modify files outside {WORKSPACE}.
+Use python3 for all commands."""
+    out, err, code = run(f"{AGY_BIN} --print-timeout 10m --print '{_sq(prompt)}'", timeout=TIMEOUT)
+    return {"output": out or "", "errors": err or "", "success": code == 0}
 
 def review_task(task, plan):
-    title = task["title"]
-    diff, _, _ = run("git diff main...HEAD", workdir=WORKSPACE)
-    if len(diff) > 8000:
-        diff = diff[:8000] + "\n... (truncated)"
-    tests, _, _ = run("python3 -m pytest tests/ -v --tb=short", workdir=WORKSPACE, timeout=120)
-    prompt = f"""Review this implementation for the Metaphors project.
+    diff, _, _ = run(f"git diff {BRANCH}...HEAD", workdir=WORKSPACE)
+    if len(diff) > 6000:
+        diff = diff[:6000] + "\n..."
+    tests, _, _ = run("python3 -m pytest tests/ --tb=short -q", workdir=WORKSPACE, timeout=120)
+    prompt = f"""Review this code for the Metaphors project.
 
-TASK: {title}
-PLAN: {plan}
-DIFF: {diff}
-TESTS: {tests[-2000:]}
+Task: {task['title']}
+Diff: {diff}
+Tests: {tests[-1500:]}
 
-Check: correctness, test coverage, code quality, security, completeness.
-Output: VERDICT: PASS or FAIL, then brief explanation.
-Under 300 words."""
-    stdout, _, code = run(f"{HERMES_BIN} chat -q '{_sq(prompt)}'", timeout=120)
-    if code != 0 or not stdout:
+Check: correctness, tests, quality, security.
+Output exactly: VERDICT: PASS or VERDICT: FAIL
+Then one sentence why."""
+    out, _, code = run(f"{HERMES_BIN} chat -q '{_sq(prompt)}'", timeout=120)
+    if code != 0 or not out:
         return {"verdict": "PASS", "summary": "Review skipped"}
-    verdict = "PASS" if "VERDICT: PASS" in stdout.upper() else "FAIL"
-    return {"verdict": verdict, "summary": stdout}
+    verdict = "PASS" if "VERDICT: PASS" in out.upper() else "FAIL"
+    return {"verdict": verdict, "summary": out}
 
-def fix_task(task, review_summary):
-    title = task["title"]
-    prompt = f"""Fix issues found during code review for Metaphors project.
+def fix_task(task, review):
+    prompt = f"""Fix issues for the Metaphors project at {WORKSPACE}.
 
-PROJECT: {WORKSPACE}
-TASK: {title}
-REVIEW: {review_summary}
+Task: {task['title']}
+Review: {review}
 
-Fix each issue. Run tests. Commit fixes.
-Only fix listed issues — no refactoring."""
-    stdout, _, code = run(f"{AGY_BIN} --print-timeout 10m --print '{_sq(prompt)}'", timeout=TIMEOUT)
-    return {"success": code == 0, "output": stdout or ""}
-
+Fix each issue. Run tests. Commit.
+Only fix listed issues."""
+    out, _, code = run(f"{AGY_BIN} --print-timeout 10m --print '{_sq(prompt)}'", timeout=TIMEOUT)
+    return {"success": code == 0}
 
 # ─── Main ──────────────────────────────────────────────────────────
 
 def main():
-    log("Metaphors autonomous worker starting")
+    log("Autonomous worker starting")
 
-    # Phase 1: Scan project
+    # Scan
     scanner = ProjectScanner().scan()
-    status = scanner.get_status_message()
-    log(f"Project status:\n{status}")
 
-    # Phase 2: Identify gaps and create tasks
-    gaps = scanner.get_gaps()
-    if gaps:
-        log(f"Found {len(gaps)} gaps")
-        created = create_tasks_for_gaps(gaps)
-        if created:
-            log(f"Created {created} new tasks")
+    # Auto-create tasks for gaps
+    created = auto_create_tasks(scanner)
 
-    # Phase 3: Pick next task
+    # Pick task
     task = get_next_task()
     if not task:
-        log("No ready tasks.")
-        output = {
-            "type": "idle",
-            "message": f"📋 **Metaphors project status:**\n\n{status}\n\n"
-                       f"{'✅ All files present!' if not scanner.missing else f'❌ {len(scanner.missing)} files missing'}\n"
-                       f"{'🧪 All tests pass' if scanner.test_results.get('exit_code', 0) == 0 else '🧪 Tests failing'}\n"
-                       f"{'🖥️ Server runs' if scanner.server_runs else '🖥️ Server broken'}\n\n"
-                       f"Add a task or let the worker auto-create one next cycle."
-        }
-        print(json.dumps(output))
+        if scanner.has_critical_gaps():
+            # Gaps exist but tasks are running — don't spam discord
+            log(f"Gaps exist but no ready tasks. Tests: {scanner.test_summary}")
+            return  # Silent — tasks are in progress
+
+        # Truly idle — notify discord
+        if check_app_running():
+            version = get_app_version()
+            msg = f"🤖 **Metaphors worker idle.**\n\n"
+            msg += f"App running on port {APP_PORT} — version `{version}`\n"
+            msg += f"Tests: {scanner.test_summary or 'all passing'}\n"
+            msg += f"Missing files: {len(scanner.missing)}\n\n"
+            msg += f"Nothing to do. Add a task or let me find gaps next cycle."
+        else:
+            msg = f"🤖 **Metaphors worker idle.**\n\n"
+            msg += f"App not running. Tests: {scanner.test_summary or 'all passing'}\n"
+            msg += f"Missing files: {len(scanner.missing)}\n\n"
+            msg += f"Nothing to do."
+        print(json.dumps({"type": "idle", "message": msg}))
         return
 
+    # Execute task
     task_id = task["id"]
     title = task["title"]
-    log(f"Task: {task_id} — {title}")
-    claim_task(task_id)
+    log(f"Working on: {title}")
 
-    # Create branch
-    branch_name = task_branch_name(task_id, title)
-    git_create_branch(branch_name)
-    comment_task(task_id, f"Branch: `{branch_name}`")
+    branch = f"task/{task_id[:8]}-{re.sub(r'[^a-zA-Z0-9]+', '-', title.lower())[:30]}"
+    git_create_branch(branch)
 
-    # Plan
+    # Plan → Implement → Review → Fix → Merge → Push
     plan = plan_task(task)
     if not plan:
-        block_task(task_id, "Planning failed")
-        git_ensure_main()
-        run(f"git branch -D {branch_name}", workdir=WORKSPACE)
+        run(f"git checkout {BRANCH} && git branch -D {branch}", workdir=WORKSPACE)
         return
-    comment_task(task_id, f"PLAN:\n{plan[:400]}")
 
-    # Implement
     impl = implement_task(task, plan)
     if not impl["success"]:
-        block_task(task_id, f"Implementation failed:\n{impl['errors'][-300:]}")
-        git_ensure_main()
-        run(f"git branch -D {branch_name}", workdir=WORKSPACE)
+        run(f"git checkout {BRANCH} && git branch -D {branch}", workdir=WORKSPACE)
         return
 
-    # Review loop
     review_round = 0
-    for fix_round in range(MAX_FIX_ROUNDS):
-        review_round = fix_round + 1
+    for i in range(MAX_FIX_ROUNDS):
+        review_round = i + 1
         review = review_task(task, plan)
         if review["verdict"] == "PASS":
-            comment_task(task_id, f"REVIEW (round {review_round}): PASS")
             break
-        comment_task(task_id, f"REVIEW (round {review_round}): FAIL\n{review['summary'][:300]}")
-        fix = fix_task(task, review["summary"])
-        if not fix["success"]:
-            block_task(task_id, f"Fix failed:\n{review['summary'][:300]}")
-            git_ensure_main()
-            run(f"git branch -D {branch_name}", workdir=WORKSPACE)
+        if not fix_task(task, review["summary"]):
+            run(f"git checkout {BRANCH} && git branch -D {branch}", workdir=WORKSPACE)
             return
-    else:
-        comment_task(task_id, f"WARNING: {MAX_FIX_ROUNDS} review rounds exhausted")
 
-    # Merge
-    merged = git_merge_branch(branch_name, title)
+    merged = git_merge_branch(branch, title)
     if not merged:
-        block_task(task_id, "Merge failed")
         return
 
-    # Build summary
+    pushed = git_push()
+
+    # Build notification
     files = git_diff_main_names()
-    stat = git_diff_main_stat()
-    summary = f"**✅ Task Complete: {title}**\n\n"
-    summary += f"**Workflow:** Plan → Implement → Review ({review_round} round) → Merge\n\n"
-    summary += f"**Branch:** `{branch_name}` → `main`\n\n"
-    summary += "**Files:**\n"
-    for f in files[:10]:
-        summary += f"• `{f}`\n"
-    if len(files) > 10:
-        summary += f"• ... +{len(files) - 10} more\n"
+    version = get_app_running_version() if check_app_running() else get_app_version()
+    app_running = check_app_running()
 
-    complete_task(task_id, summary)
-    log(f"Done: {title}")
+    msg = f"✅ **Shipped: {title}**\n\n"
+    msg += f"**Files:** {', '.join(f'`{f}`' for f in files[:5])}"
+    if len(files) > 5:
+        msg += f" +{len(files)-5} more"
+    msg += f"\n**Review:** {'pass' if review_round == 1 else f'{review_round} rounds'}"
+    msg += f"\n**Branch:** `{branch}` → `{BRANCH}`"
+    if pushed:
+        msg += f" → pushed"
+    if app_running:
+        msg += f"\n\n🚀 **App live** on port {APP_PORT} — version `{version}`"
+        msg += f"\nhttp://localhost:{APP_PORT}"
 
-    # Rescan after completion
-    scanner2 = ProjectScanner().scan()
-    new_status = scanner2.get_status_message()
-    summary += f"\n\n**Project status after:**\n{new_status}"
+    print(json.dumps({"type": "shipped", "message": msg}))
+    log(f"Shipped: {title}")
 
-    print(json.dumps({"type": "complete", "message": summary}))
+
+def get_app_running_version():
+    out, _, _ = run("git rev-parse --short HEAD", workdir=WORKSPACE)
+    return out or "unknown"
 
 
 if __name__ == "__main__":
