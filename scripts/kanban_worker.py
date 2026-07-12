@@ -28,6 +28,7 @@ HERMES_BIN = os.path.expanduser("~/.local/bin/hermes")
 TIMEOUT = 600
 MAX_FIX_ROUNDS = 2
 APP_PORT = 8080
+SERVICE_NAME = "metaphors.service"
 
 # ─── Helpers ───────────────────────────────────────────────────────
 
@@ -203,6 +204,13 @@ def git_merge_branch(name, title):
     run(f"git branch -D {name}", workdir=WORKSPACE)
     return True
 
+def restart_service():
+    """Restart the Metaphors service after update."""
+    run(f"systemctl --user restart {SERVICE_NAME}", workdir=WORKSPACE)
+    time.sleep(2)
+    out, _, code = run(f"systemctl --user is-active {SERVICE_NAME}")
+    return code == 0 and "active" in out
+
 def git_push():
     """Push main to remote."""
     _, stderr, code = run(f"git push {REMOTE} {BRANCH}", workdir=WORKSPACE, timeout=30)
@@ -218,6 +226,11 @@ def git_diff_main_names():
     return [f.strip() for f in names.splitlines() if f.strip()]
 
 # ─── App Status ────────────────────────────────────────────────────
+
+def check_service_running():
+    """Check if systemd service is active."""
+    out, _, code = run(f"systemctl --user is-active {SERVICE_NAME}")
+    return code == 0 and "active" in out
 
 def check_app_running():
     """Check if the app is running on the expected port."""
@@ -375,12 +388,15 @@ def main():
 
     pushed = git_push()
 
+    # Restart service to pick up changes
+    restarted = restart_service()
+    app_running = check_service_running()
+
     # Build notification
     files = git_diff_main_names()
-    version = get_app_running_version() if check_app_running() else get_app_version()
-    app_running = check_app_running()
+    version = get_app_version()
 
-    msg = f"✅ **Shipped: {title}**\n\n"
+    msg = f"**Shipped: {title}**\n\n"
     msg += f"**Files:** {', '.join(f'`{f}`' for f in files[:5])}"
     if len(files) > 5:
         msg += f" +{len(files)-5} more"
@@ -389,11 +405,13 @@ def main():
     if pushed:
         msg += f" → pushed"
     if app_running:
-        msg += f"\n\n🚀 **App live** on port {APP_PORT} — version `{version}`"
+        msg += f"\n\n**App live** on port {APP_PORT} — version `{version}`"
         msg += f"\nhttp://localhost:{APP_PORT}"
-
-    print(json.dumps({"type": "shipped", "message": msg}))
+        msg += f"\nhttp://192.168.195.192:{APP_PORT} (ZeroTier)"
+    else:
+        msg += f"\n\n**Service restart failed** — check: journalctl --user -u {SERVICE_NAME}"
     log(f"Shipped: {title}")
+    print(json.dumps({"type": "shipped", "message": msg}))
 
 
 def get_app_running_version():
