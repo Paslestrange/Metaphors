@@ -1,4 +1,4 @@
-"""Tests for SpaceStationRenderer metaphor."""
+"""Tests for SpaceStationRenderer metaphor — full visual overhaul."""
 import pytest
 from engine.metaphors.space import SpaceStationRenderer, STATE_COLORS
 
@@ -21,6 +21,33 @@ def _make_entities():
         {"id": "ct2", "type": "container", "name": "Fuel Cell", "state": "critical",
          "parent": "s2", "children": [], "metrics": {"cpu": 99, "mem": 98}},
     ]
+
+
+class MockCtx:
+    """Mock canvas rendering context that records all calls."""
+    def __init__(self):
+        self.calls = []
+    def fillStyle(self, c): self.calls.append(("fillStyle", c))
+    def fillRect(self, *a): self.calls.append(("fillRect", a))
+    def strokeStyle(self, c): self.calls.append(("strokeStyle", c))
+    def strokeRect(self, *a): self.calls.append(("strokeRect", a))
+    def lineWidth(self, w): self.calls.append(("lineWidth", w))
+    def font(self, f): self.calls.append(("font", f))
+    def fillText(self, *a): self.calls.append(("fillText", a))
+    def beginPath(self): self.calls.append(("beginPath",))
+    def arc(self, *a): self.calls.append(("arc", a))
+    def stroke(self): self.calls.append(("stroke",))
+    def fill(self): self.calls.append(("fill",))
+    def moveTo(self, *a): self.calls.append(("moveTo", a))
+    def lineTo(self, *a): self.calls.append(("lineTo", a))
+    def closePath(self): self.calls.append(("closePath",))
+    def save(self): self.calls.append(("save",))
+    def restore(self): self.calls.append(("restore",))
+    def globalAlpha(self, a): self.calls.append(("globalAlpha", a))
+    def translate(self, *a): self.calls.append(("translate", a))
+    def rotate(self, *a): self.calls.append(("rotate", a))
+    def clip(self): self.calls.append(("clip",))
+    def setLineDash(self, *a): self.calls.append(("setLineDash", a))
 
 
 class TestSpaceStationLayout:
@@ -157,28 +184,6 @@ class TestSpaceStationRender:
     def test_render_calls_context_methods(self):
         r = SpaceStationRenderer()
         entities = _make_entities()
-
-        class MockCtx:
-            def __init__(self):
-                self.calls = []
-            def fillStyle(self, c): self.calls.append(("fillStyle", c))
-            def fillRect(self, *a): self.calls.append(("fillRect", a))
-            def strokeStyle(self, c): self.calls.append(("strokeStyle", c))
-            def strokeRect(self, *a): self.calls.append(("strokeRect", a))
-            def lineWidth(self, w): self.calls.append(("lineWidth", w))
-            def font(self, f): self.calls.append(("font", f))
-            def fillText(self, *a): self.calls.append(("fillText", a))
-            def beginPath(self): self.calls.append(("beginPath",))
-            def arc(self, *a): self.calls.append(("arc", a))
-            def stroke(self): self.calls.append(("stroke",))
-            def fill(self): self.calls.append(("fill",))
-            def moveTo(self, *a): self.calls.append(("moveTo", a))
-            def lineTo(self, *a): self.calls.append(("lineTo", a))
-            def closePath(self): self.calls.append(("closePath",))
-            def save(self): self.calls.append(("save",))
-            def restore(self): self.calls.append(("restore",))
-            def globalAlpha(self, a): self.calls.append(("globalAlpha", a))
-
         ctx = MockCtx()
         r.render(entities, ctx, 800, 600)
         assert len(ctx.calls) > 0
@@ -194,33 +199,103 @@ class TestSpaceStationRender:
             {"id": "c1", "type": "cluster", "name": "Ring", "state": "healthy",
              "parent": None, "children": [], "metrics": {}},
         ]
-
-        class MockCtx:
-            def __init__(self):
-                self.calls = []
-            def fillStyle(self, c): self.calls.append(("fillStyle", c))
-            def fillRect(self, *a): self.calls.append(("fillRect", a))
-            def strokeStyle(self, c): self.calls.append(("strokeStyle", c))
-            def strokeRect(self, *a): self.calls.append(("strokeRect", a))
-            def lineWidth(self, w): self.calls.append(("lineWidth", w))
-            def font(self, f): self.calls.append(("font", f))
-            def fillText(self, *a): self.calls.append(("fillText", a))
-            def beginPath(self): self.calls.append(("beginPath",))
-            def arc(self, *a): self.calls.append(("arc", a))
-            def stroke(self): self.calls.append(("stroke",))
-            def fill(self): self.calls.append(("fill",))
-            def moveTo(self, *a): self.calls.append(("moveTo", a))
-            def lineTo(self, *a): self.calls.append(("lineTo", a))
-            def closePath(self): self.calls.append(("closePath",))
-            def save(self): self.calls.append(("save",))
-            def restore(self): self.calls.append(("restore",))
-            def globalAlpha(self, a): self.calls.append(("globalAlpha", a))
-
         ctx = MockCtx()
         r.render(entities, ctx, 800, 600)
-        # Stars are small filled rects or arcs in the background
+        # Stars are small filled rects in the background
         fill_calls = [c for c in ctx.calls if c[0] == "fillRect"]
         assert len(fill_calls) > 1  # At least background + some stars
+
+    def test_render_generates_star_layers(self):
+        """Renderer should generate 3-layer parallax star field."""
+        r = SpaceStationRenderer()
+        entities = [
+            {"id": "c1", "type": "cluster", "name": "Ring", "state": "healthy",
+             "parent": None, "children": [], "metrics": {}},
+        ]
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        assert len(r._star_layers) == 3
+        assert len(r._star_layers[0]) > 0  # distant stars
+        assert len(r._star_layers[1]) > 0  # mid stars
+        assert len(r._star_layers[2]) > 0  # close stars
+
+    def test_render_generates_debris(self):
+        """Renderer should generate floating debris particles."""
+        r = SpaceStationRenderer()
+        entities = [
+            {"id": "c1", "type": "cluster", "name": "Ring", "state": "healthy",
+             "parent": None, "children": [], "metrics": {}},
+        ]
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        assert len(r._debris) > 0
+
+    def test_render_draws_corridors(self):
+        """Modules should be connected to hub via corridors."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        # Corridors use moveTo + lineTo
+        move_calls = [c for c in ctx.calls if c[0] == "moveTo"]
+        line_calls = [c for c in ctx.calls if c[0] == "lineTo"]
+        assert len(move_calls) > 0
+        assert len(line_calls) > 0
+
+    def test_render_draws_solar_panels(self):
+        """Modules should have solar panels extending from them."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        # Solar panels use save/restore/translate/rotate
+        save_calls = [c for c in ctx.calls if c[0] == "save"]
+        translate_calls = [c for c in ctx.calls if c[0] == "translate"]
+        rotate_calls = [c for c in ctx.calls if c[0] == "rotate"]
+        assert len(save_calls) > 0
+        assert len(translate_calls) > 0
+        assert len(rotate_calls) > 0
+
+    def test_render_draws_docking_rings(self):
+        """Services should have docking port rings."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        # Multiple arc calls for docking rings
+        arc_calls = [c for c in ctx.calls if c[0] == "arc"]
+        assert len(arc_calls) > 5  # hub + modules + pods + effects
+
+    def test_render_draws_led_indicators(self):
+        """Modules should have LED-style life support indicators."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        layout = r.compute_layout(entities, 800, 600)
+        # Modules should have LED data
+        assert "led_power" in layout["n1"]
+        assert "led_data" in layout["n1"]
+        assert "led_env" in layout["n1"]
+
+    def test_render_draws_control_panels(self):
+        """Hub and modules should have control panel glow."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        # Control panels use fillRect for screens
+        fill_rect_calls = [c for c in ctx.calls if c[0] == "fillRect"]
+        assert len(fill_rect_calls) > 10  # background + stars + panels + compartments
+
+    def test_render_emergency_lighting_for_critical(self):
+        """Critical entities should trigger emergency lighting."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        # Emergency lighting adds extra arc calls for pulse rings
+        # ct2 is critical, so we should see extra arcs
+        arc_calls = [c for c in ctx.calls if c[0] == "arc"]
+        assert len(arc_calls) > 10  # many arcs from emergency pulses
 
 
 class TestSpaceStationBreachAnimation:
@@ -239,6 +314,17 @@ class TestSpaceStationBreachAnimation:
         entities = _make_entities()
         layout = r.compute_layout(entities, 800, 600)
         assert layout["ct1"].get("breach") is not True
+
+    def test_breach_renders_sparks(self):
+        """Critical entities should render spark effects."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        ctx = MockCtx()
+        r.render(entities, ctx, 800, 600)
+        # Breach sparks use moveTo/lineTo for spark lines
+        # We already have corridors, but breach adds more
+        move_calls = [c for c in ctx.calls if c[0] == "moveTo"]
+        assert len(move_calls) > 5  # corridors + breach sparks
 
 
 class TestSpaceStationDockingPorts:
@@ -262,3 +348,96 @@ class TestSpaceStationDockingPorts:
         ]
         layout = r.compute_layout(entities, 800, 600)
         assert layout["s1"]["docking_glow"] == 0.0
+
+    def test_docking_color_green_when_available(self):
+        """Low-traffic ports should show green (available) docking ring."""
+        r = SpaceStationRenderer()
+        entities = [
+            {"id": "s1", "type": "service", "parent": None, "children": [],
+             "name": "free", "state": "healthy", "metrics": {"req_per_sec": 2}},
+        ]
+        layout = r.compute_layout(entities, 800, 600)
+        assert layout["s1"]["docking_color"] == "#00ff88"
+        assert layout["s1"]["docking_available"] is True
+
+    def test_docking_color_red_when_occupied(self):
+        """High-traffic ports should show red (occupied) docking ring."""
+        r = SpaceStationRenderer()
+        entities = [
+            {"id": "s1", "type": "service", "parent": None, "children": [],
+             "name": "busy", "state": "healthy", "metrics": {"req_per_sec": 50}},
+        ]
+        layout = r.compute_layout(entities, 800, 600)
+        assert layout["s1"]["docking_color"] == "#ff2222"
+        assert layout["s1"]["docking_available"] is False
+
+
+class TestSpaceStationShuttleTraffic:
+    def test_shuttle_count_scales_with_requests(self):
+        """Higher req_per_sec should produce more shuttle traffic."""
+        r = SpaceStationRenderer()
+        entities_low = [
+            {"id": "s1", "type": "service", "parent": None, "children": [],
+             "name": "low", "state": "healthy", "metrics": {"req_per_sec": 5}},
+        ]
+        entities_high = [
+            {"id": "s1", "type": "service", "parent": None, "children": [],
+             "name": "high", "state": "healthy", "metrics": {"req_per_sec": 50}},
+        ]
+        layout_low = r.compute_layout(entities_low, 800, 600)
+        layout_high = r.compute_layout(entities_high, 800, 600)
+        assert layout_high["s1"]["shuttle_count"] >= layout_low["s1"]["shuttle_count"]
+
+    def test_no_requests_no_shuttles(self):
+        """Zero request rate should produce no shuttle traffic."""
+        r = SpaceStationRenderer()
+        entities = [
+            {"id": "s1", "type": "service", "parent": None, "children": [],
+             "name": "idle", "state": "healthy", "metrics": {"req_per_sec": 0}},
+        ]
+        layout = r.compute_layout(entities, 800, 600)
+        assert layout["s1"]["shuttle_count"] == 0
+
+
+class TestSpaceStationSolarPanels:
+    def test_modules_have_solar_panel_data(self):
+        """Modules should have solar panel geometry in layout."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        layout = r.compute_layout(entities, 800, 600)
+        assert "solar_angle" in layout["n1"]
+        assert "solar_length" in layout["n1"]
+        assert "solar_width" in layout["n1"]
+
+
+class TestSpaceStationPowerCore:
+    def test_power_core_glow_matches_cpu(self):
+        """Power core glow intensity should match CPU usage."""
+        r = SpaceStationRenderer()
+        entities = [
+            {"id": "c1", "type": "cluster", "name": "Ring", "state": "healthy",
+             "parent": None, "children": [], "metrics": {"cpu": 75}},
+        ]
+        layout = r.compute_layout(entities, 800, 600)
+        assert abs(layout["c1"]["power_glow"] - 0.75) < 0.01
+
+
+class TestSpaceStationLifeSupport:
+    def test_life_support_leds_present(self):
+        """Modules should have 3 LED indicators."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        layout = r.compute_layout(entities, 800, 600)
+        assert "led_power" in layout["n1"]
+        assert "led_data" in layout["n1"]
+        assert "led_env" in layout["n1"]
+
+    def test_life_support_color_matches_state(self):
+        """Module life support color should match entity state."""
+        r = SpaceStationRenderer()
+        entities = _make_entities()
+        layout = r.compute_layout(entities, 800, 600)
+        # n1 is "running" → "#60a5fa"
+        assert layout["n1"]["life_support_color"] == "#60a5fa"
+        # n2 is "warning" → "#fbbf24"
+        assert layout["n2"]["life_support_color"] == "#fbbf24"
