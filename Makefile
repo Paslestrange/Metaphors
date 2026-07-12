@@ -19,3 +19,9 @@ clean: ## Clean up cache and temp files
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type d -name .pytest_cache -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+
+screenshot: ## Capture screenshot of running app
+	python3 scripts/screenshot.py
+
+screenshot-hd: ## Capture HD screenshot (1920x1080)
+	python3 scripts/screenshot.py --width 1920 --height 1080
