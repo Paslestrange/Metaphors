@@ -1,8 +1,15 @@
-"""City metaphor renderer — Neon Cyberpunk aesthetic.
+"""City metaphor renderer — Full Cyberpunk Visual Overhaul.
+
+6-layer depth rendering:
+  Layer 0: Sky gradient + stars
+  Layer 1: Far buildings (silhouette skyline)
+  Layer 2: Ground / roads / crosswalks / traffic lights
+  Layer 3: Main buildings (architectural detail, windows, roof mechanicals, awnings, antennas)
+  Layer 4: Rain / particles / traffic
+  Layer 5: HUD overlay (neon signs, labels, tooltips)
 
 Cluster→District, Node→Block, Service→Building.
 Building height = CPU usage, width = memory usage.
-Neon glow, rain reflections, traffic particles, fire/smoke for critical.
 """
 from __future__ import annotations
 
@@ -14,7 +21,7 @@ from typing import Any
 from engine.metaphors.base import MetaphorRenderer
 
 
-# State → neon color map
+# State → color map (spec-mandated)
 STATE_COLORS = {
     "healthy": "#4ade80",
     "running": "#60a5fa",
@@ -28,7 +35,7 @@ STATE_COLORS = {
     "unknown": "#6b7280",
 }
 
-# Neon glow colors per state (brighter version for glow)
+# Neon glow colors per state
 NEON_GLOW = {
     "healthy": "#22ff88",
     "running": "#44aaff",
@@ -42,8 +49,9 @@ NEON_GLOW = {
     "unknown": "#778899",
 }
 
-# Background
+# Background / environment
 BG_COLOR = "#0a0a1a"
+BG_COLOR_HORIZON = "#0d0d22"
 GROUND_COLOR = "#0d0d22"
 ROAD_COLOR = "#111128"
 
@@ -52,20 +60,36 @@ MIN_BUILDING_W = 12
 MAX_BUILDING_W = 80
 WINDOW_COLOR_HEALTHY = "#fbbf24"
 WINDOW_COLOR_WARNING = "#f97316"
+WINDOW_COLOR_CRITICAL = "#ff4444"
 WINDOW_COLOR_OFF = "#1a1a2e"
+BUILDING_WALL = "#1a1a3e"
 
 # Neon sign
 NEON_SIGN_BG = "#0f0f2a"
 NEON_SIGN_BORDER = "#ff00ff"
 
-# Traffic particle
+# Traffic particle (kept for test compat)
 TRAFFIC_COLORS = ["#ff00ff", "#00ffff", "#ffff00", "#ff4488"]
+
+# Star field
+STAR_COUNT = 80
+
+# Rain
+RAIN_COUNT = 120
+
+# Far buildings
+FAR_BUILDING_COUNT = 18
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     """Convert hex color to RGB tuple."""
     h = hex_color.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    """Convert RGB to hex string."""
+    return f"#{max(0,min(255,r)):02x}{max(0,min(255,g)):02x}{max(0,min(255,b)):02x}"
 
 
 class TrafficParticle:
@@ -96,17 +120,104 @@ class TrafficParticle:
             pass
 
 
-class CityRenderer(MetaphorRenderer):
-    """Neon Cyberpunk city metaphor.
+class RainDrop:
+    """A single rain drop — vertical semi-transparent line."""
 
-    Clusters are districts with neon borders.
-    Nodes are blocks (dark pads).
-    Services are buildings — height=CPU, width=memory.
-    Neon signs label services.
-    Rain-slicked road reflections shimmer.
-    Traffic particles flow on roads.
-    Critical buildings emit fire/smoke.
-    Warning buildings pulse with glow.
+    def __init__(self, x: float, y: float, speed: float, length: float):
+        self.x = x
+        self.y = y
+        self.speed = speed
+        self.length = length
+        self.alpha = random.uniform(0.05, 0.18)
+
+    def update(self, dt: float, canvas_w: int, canvas_h: int) -> None:
+        self.y += self.speed * dt
+        if self.y > canvas_h:
+            self.y = -self.length
+            self.x = random.uniform(0, canvas_w)
+
+    def draw(self, ctx: Any) -> None:
+        try:
+            ctx.globalAlpha(self.alpha)
+            ctx.fillStyle("#8899cc")
+            ctx.fillRect(self.x, self.y, 1, self.length)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+
+class Star:
+    """A single star in the sky."""
+
+    def __init__(self, x: float, y: float, size: float, brightness: float):
+        self.x = x
+        self.y = y
+        self.size = size
+        self.brightness = brightness
+        self.twinkle_speed = random.uniform(0.5, 3.0)
+        self.phase = random.uniform(0, math.pi * 2)
+
+    def draw(self, ctx: Any, now: float) -> None:
+        alpha = self.brightness * (0.5 + 0.5 * math.sin(now * self.twinkle_speed + self.phase))
+        try:
+            ctx.globalAlpha(alpha)
+            ctx.fillStyle("#ffffff")
+            ctx.fillRect(self.x, self.y, self.size, self.size)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+
+class FarBuilding:
+    """Silhouette building in the background skyline."""
+
+    def __init__(self, x: float, w: float, h: float):
+        self.x = x
+        self.w = w
+        self.h = h
+        # A few dim windows
+        self.windows = []
+        n_cols = max(1, int(w / 6))
+        n_rows = max(1, int(h / 8))
+        for r in range(n_rows):
+            for c in range(n_cols):
+                if random.random() < 0.3:
+                    self.windows.append((
+                        x + 2 + c * (w / max(n_cols, 1)),
+                        r * 8 + 4,
+                        random.choice(["#1a1a3e", "#222244", "#2a2a4a"]),
+                    ))
+
+    def draw(self, ctx: Any, base_y: float) -> None:
+        # Dark silhouette
+        try:
+            ctx.globalAlpha(0.6)
+            ctx.fillStyle("#0e0e24")
+            ctx.fillRect(self.x, base_y - self.h, self.w, self.h)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+        # Dim windows
+        for wx, wy, wc in self.windows:
+            try:
+                ctx.globalAlpha(0.3)
+                ctx.fillStyle(wc)
+                ctx.fillRect(wx, base_y - self.h + wy, 3, 3)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+
+class CityRenderer(MetaphorRenderer):
+    """Neon Cyberpunk city metaphor — full visual overhaul.
+
+    6-layer depth:
+      0: Sky gradient + stars
+      1: Far buildings (silhouette skyline)
+      2: Ground / roads / crosswalks / traffic lights
+      3: Main buildings with architectural detail
+      4: Rain / traffic particles
+      5: HUD (neon signs, labels)
     """
 
     name = "city"
@@ -115,8 +226,12 @@ class CityRenderer(MetaphorRenderer):
     def __init__(self):
         self._layout: dict[str, dict[str, float]] = {}
         self._particles: list[TrafficParticle] = []
+        self._rain: list[RainDrop] = []
+        self._stars: list[Star] = []
+        self._far_buildings: list[FarBuilding] = []
         self._time_offset: float = 0.0
         self._rng = random.Random(42)
+        self._initialized: bool = False
 
     # ------------------------------------------------------------------
     # Layout
@@ -125,23 +240,18 @@ class CityRenderer(MetaphorRenderer):
     def compute_layout(
         self, entities: list[dict[str, Any]], w: int, h: int
     ) -> dict[str, dict[str, float]]:
-        """Compute positions for all entities. Handles 0-500 entities.
-
-        Building height = CPU (0-100%), width = memory (0-100%).
-        """
+        """Compute positions for all entities. Handles 0-500 entities."""
         layout: dict[str, dict[str, float]] = {}
         if not entities:
             self._layout = layout
             return layout
 
-        # Cap to 500 entities for performance
         entities = entities[:500]
 
         by_id = {e["id"]: e for e in entities}
         roots = [e for e in entities if not e.get("parent")]
 
         if not roots:
-            # No hierarchy — treat all as flat
             self._layout = layout
             return layout
 
@@ -160,7 +270,7 @@ class CityRenderer(MetaphorRenderer):
             if not children:
                 continue
 
-            block_h = (h - 60) / max(len(children), 1)  # reserve 60px for ground/roads
+            block_h = (h - 60) / max(len(children), 1)
 
             for bi, child in enumerate(children):
                 by_ = bi * block_h
@@ -188,7 +298,6 @@ class CityRenderer(MetaphorRenderer):
                     cpu = max(0, min(100, metrics.get("cpu", 50)))
                     mem = max(0, min(100, metrics.get("mem", 50)))
 
-                    # Building width = memory, height = CPU
                     bw = max(MIN_BUILDING_W, MIN_BUILDING_W + (MAX_BUILDING_W - MIN_BUILDING_W) * (mem / 100))
                     bw = min(bw, building_slot_w - 4)
                     max_bh = block_h - 50
@@ -205,12 +314,48 @@ class CityRenderer(MetaphorRenderer):
                     }
 
         self._layout = layout
-        self._init_particles(w, h)
+        self._init_scene(w, h)
         return layout
 
     # ------------------------------------------------------------------
-    # Traffic particles
+    # Scene initialization
     # ------------------------------------------------------------------
+
+    def _init_scene(self, w: int, h: int) -> None:
+        """Initialize stars, far buildings, rain, traffic particles."""
+        # Stars
+        self._stars = []
+        for _ in range(STAR_COUNT):
+            sx = self._rng.uniform(0, w)
+            sy = self._rng.uniform(0, h * 0.35)
+            ss = self._rng.uniform(0.5, 2.0)
+            sb = self._rng.uniform(0.3, 0.9)
+            self._stars.append(Star(sx, sy, ss, sb))
+
+        # Far buildings (silhouette skyline at horizon)
+        self._far_buildings = []
+        horizon_y = h * 0.45
+        fx = 0.0
+        for _ in range(FAR_BUILDING_COUNT):
+            fw = self._rng.uniform(15, 50)
+            fh = self._rng.uniform(20, horizon_y * 0.6)
+            self._far_buildings.append(FarBuilding(fx, fw, fh))
+            fx += fw + self._rng.uniform(2, 12)
+            if fx > w:
+                break
+
+        # Rain
+        self._rain = []
+        for _ in range(RAIN_COUNT):
+            rx = self._rng.uniform(0, w)
+            ry = self._rng.uniform(0, h)
+            rs = self._rng.uniform(200, 500)
+            rl = self._rng.uniform(6, 18)
+            self._rain.append(RainDrop(rx, ry, rs, rl))
+
+        # Traffic particles
+        self._init_particles(w, h)
+        self._initialized = True
 
     def _init_particles(self, w: int, h: int) -> None:
         """Create traffic particles on the road strip."""
@@ -224,83 +369,634 @@ class CityRenderer(MetaphorRenderer):
             color = self._rng.choice(TRAFFIC_COLORS)
             self._particles.append(TrafficParticle(px, py, road_y, speed, color))
 
-    def _update_particles(self, dt: float, w: int) -> None:
+    def _update_particles(self, dt: float, w: int, h: int) -> None:
         for p in self._particles:
             p.update(dt, w)
+        for r in self._rain:
+            r.update(dt, w, h)
 
     # ------------------------------------------------------------------
-    # Render
+    # Render — 6-layer pipeline
     # ------------------------------------------------------------------
 
     def render(self, entities: list[dict[str, Any]], ctx: Any, w: int, h: int) -> None:
-        """Render the neon cyberpunk city."""
+        """Render the cyberpunk city with full visual overhaul."""
         layout = self.compute_layout(entities, w, h)
         now = time.monotonic()
         dt = now - self._time_offset if self._time_offset > 0 else 0.016
         self._time_offset = now
-        self._update_particles(dt, w)
+        self._update_particles(dt, w, h)
 
-        # === Background ===
-        self._draw_background(ctx, w, h)
+        # Layer 0: Sky gradient + stars
+        self._draw_sky(ctx, w, h, now)
 
-        # === Districts (clusters) ===
+        # Layer 1: Far buildings (silhouette skyline)
+        self._draw_far_buildings(ctx, w, h)
+
+        # Layer 2: Ground / roads / crosswalks / traffic lights
+        self._draw_ground_and_roads(ctx, w, h, now)
+
+        # Districts (clusters) — neon border overlay
         for entity in entities:
             pos = layout.get(entity["id"])
             if not pos:
                 continue
-            etype = entity.get("type", "")
-            if etype == "cluster":
+            if entity.get("type", "") == "cluster":
                 self._draw_district(ctx, entity, pos)
 
-        # === Blocks (nodes) ===
+        # Blocks (nodes) — dark pads
         for entity in entities:
             pos = layout.get(entity["id"])
             if not pos:
                 continue
-            etype = entity.get("type", "")
-            if etype == "node":
+            if entity.get("type", "") == "node":
                 self._draw_block(ctx, entity, pos)
 
-        # === Buildings (services) ===
+        # Layer 3: Main buildings with architectural detail
         for entity in entities:
             pos = layout.get(entity["id"])
             if not pos:
                 continue
-            etype = entity.get("type", "")
-            if etype == "service":
+            if entity.get("type", "") == "service":
                 self._draw_building(ctx, entity, pos, now)
 
-        # === Roads and reflections ===
-        self._draw_roads(ctx, w, h, now)
+        # Layer 4: Rain
+        self._draw_rain(ctx)
 
-        # === Traffic particles ===
+        # Layer 4: Traffic particles
         for p in self._particles:
             p.draw(ctx)
 
+        # Layer 2b: Ground reflections (wet road, mirrored building glow)
+        self._draw_ground_reflections(ctx, entities, layout, w, h, now)
+
     # ------------------------------------------------------------------
-    # Drawing helpers
+    # Layer 0: Sky + Stars
     # ------------------------------------------------------------------
 
-    def _draw_background(self, ctx: Any, w: int, h: int) -> None:
-        """Dark sky with subtle gradient."""
+    def _draw_sky(self, ctx: Any, w: int, h: int, now: float) -> None:
+        """Sky gradient from #0a0a1a (top) to #0d0d22 (horizon) + stars."""
+        # Base fill
         ctx.fillStyle(BG_COLOR)
         ctx.fillRect(0, 0, w, h)
 
-        # Subtle sky gradient (darker at top, slightly lighter near horizon)
+        # Gradient bands (top dark → horizon slightly lighter)
+        n_bands = 8
+        for i in range(n_bands):
+            frac = i / n_bands
+            y = frac * h * 0.5
+            band_h = h * 0.5 / n_bands
+            alpha = 0.02 + frac * 0.06
+            try:
+                ctx.globalAlpha(alpha)
+                ctx.fillStyle(BG_COLOR_HORIZON)
+                ctx.fillRect(0, y, w, band_h)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+        # Subtle purple haze near horizon
         try:
-            ctx.globalAlpha(0.15)
+            ctx.globalAlpha(0.08)
             ctx.fillStyle("#1a0a3a")
-            ctx.fillRect(0, 0, w, h * 0.4)
+            ctx.fillRect(0, h * 0.25, w, h * 0.2)
             ctx.globalAlpha(1.0)
         except (AttributeError, TypeError):
             pass
+
+        # Stars
+        for star in self._stars:
+            star.draw(ctx, now)
+
+    # ------------------------------------------------------------------
+    # Layer 1: Far Buildings (silhouette skyline)
+    # ------------------------------------------------------------------
+
+    def _draw_far_buildings(self, ctx: Any, w: int, h: int) -> None:
+        """Silhouette skyline at the horizon."""
+        horizon_y = h * 0.45
+        for fb in self._far_buildings:
+            fb.draw(ctx, horizon_y)
+
+    # ------------------------------------------------------------------
+    # Layer 2: Ground / Roads / Crosswalks / Traffic Lights
+    # ------------------------------------------------------------------
+
+    def _draw_ground_and_roads(self, ctx: Any, w: int, h: int, now: float) -> None:
+        """Ground plane, road network with lanes, crosswalks, traffic lights."""
+        ground_y = h - 50
+        road_h = 50
+
+        # Ground base
+        ctx.fillStyle(GROUND_COLOR)
+        ctx.fillRect(0, ground_y, w, road_h)
+
+        # Road surface
+        ctx.fillStyle(ROAD_COLOR)
+        ctx.fillRect(0, ground_y + 5, w, road_h - 5)
+
+        # Sidewalk strip
+        try:
+            ctx.globalAlpha(0.4)
+            ctx.fillStyle("#1a1a30")
+            ctx.fillRect(0, ground_y, w, 5)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Lane markings — dashed center line
+        ctx.fillStyle("#2a2a4a")
+        line_y = ground_y + 5 + (road_h - 5) / 2
+        dash_x = 0.0
+        while dash_x < w:
+            ctx.fillRect(dash_x, line_y, 20, 1)
+            dash_x += 40
+
+        # Second lane line (upper)
+        try:
+            ctx.globalAlpha(0.3)
+            lane2_y = ground_y + 5 + (road_h - 5) * 0.25
+            dash_x = 10.0
+            while dash_x < w:
+                ctx.fillRect(dash_x, lane2_y, 15, 1)
+                dash_x += 50
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Crosswalks at intervals
+        crosswalk_interval = max(150, w / 5)
+        cx = crosswalk_interval / 2
+        while cx < w:
+            self._draw_crosswalk(ctx, cx, ground_y + 5, road_h - 5)
+            cx += crosswalk_interval
+
+        # Traffic lights at crosswalks
+        cx = crosswalk_interval / 2
+        tl_idx = 0
+        while cx < w:
+            self._draw_traffic_light(ctx, cx + 15, ground_y - 2, now, tl_idx)
+            cx += crosswalk_interval
+            tl_idx += 1
+
+    def _draw_crosswalk(self, ctx: Any, cx: float, road_y: float, road_h: float) -> None:
+        """Draw a crosswalk (zebra stripes) at the given x position."""
+        stripe_w = 3
+        stripe_gap = 4
+        n_stripes = int(road_h / (stripe_w + stripe_gap))
+        try:
+            ctx.globalAlpha(0.25)
+            ctx.fillStyle("#cccccc")
+            for i in range(n_stripes):
+                sy = road_y + i * (stripe_w + stripe_gap)
+                ctx.fillRect(cx - 8, sy, 16, stripe_w)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+    def _draw_traffic_light(self, ctx: Any, x: float, y: float, now: float, idx: int) -> None:
+        """Draw a traffic light with cycling colors."""
+        # Pole
+        ctx.fillStyle("#2a2a3a")
+        ctx.fillRect(x, y - 12, 2, 14)
+
+        # Housing
+        ctx.fillStyle("#1a1a2a")
+        ctx.fillRect(x - 2, y - 18, 6, 10)
+
+        # Cycle through red/yellow/green based on time + offset
+        cycle = (now * 0.5 + idx * 2.1) % 6
+        if cycle < 2.5:
+            light_color = "#ff2222"  # red
+        elif cycle < 3.5:
+            light_color = "#ffaa00"  # yellow
+        else:
+            light_color = "#22ff44"  # green
+
+        try:
+            ctx.globalAlpha(0.8)
+            ctx.fillStyle(light_color)
+            ctx.fillRect(x - 1, y - 17, 3, 3)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+    # ------------------------------------------------------------------
+    # Layer 3: Buildings with architectural detail
+    # ------------------------------------------------------------------
+
+    def _draw_building(
+        self, ctx: Any, entity: dict, pos: dict, now: float
+    ) -> None:
+        """Building with full architectural detail: walls, windows, roof, awning, antenna."""
+        state = entity.get("state", "unknown")
+        color = STATE_COLORS.get(state, STATE_COLORS["unknown"])
+        glow = NEON_GLOW.get(state, NEON_GLOW["unknown"])
+
+        bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
+
+        # Building body — dark wall color
+        ctx.fillStyle(BUILDING_WALL)
+        ctx.fillRect(bx, by, bw, bh)
+
+        # Side shading (left darker, right lighter for depth)
+        try:
+            ctx.globalAlpha(0.15)
+            ctx.fillStyle("#000000")
+            ctx.fillRect(bx, by, bw * 0.15, bh)
+            ctx.globalAlpha(0.08)
+            ctx.fillStyle("#ffffff")
+            ctx.fillRect(bx + bw * 0.85, by, bw * 0.15, bh)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Building outline with neon glow
+        try:
+            if state == "warning":
+                pulse = 0.5 + 0.5 * math.sin(now * 4)
+                ctx.shadowBlur(6 + 10 * pulse)
+            elif state == "critical":
+                strobe = 0.5 + 0.5 * math.sin(now * 8)
+                ctx.shadowBlur(8 + 12 * strobe)
+            else:
+                ctx.shadowBlur(4)
+            ctx.shadowColor(glow)
+        except (AttributeError, TypeError):
+            pass
+
+        ctx.strokeStyle(color)
+        ctx.lineWidth(1.5)
+        ctx.strokeRect(bx, by, bw, bh)
+
+        try:
+            ctx.shadowBlur(0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Floor separators
+        if bh > 30 and bw > 14:
+            self._draw_floor_lines(ctx, pos, state)
+
+        # Windows with architectural detail
+        if bh > 25 and bw > 14:
+            self._draw_windows(ctx, entity, pos, state, now)
+
+        # Roof mechanicals (HVAC units, antenna)
+        if bw > 16 and bh > 20:
+            self._draw_roof_details(ctx, pos, state, now)
+
+        # Entrance awning at ground floor
+        if bh > 35 and bw > 18:
+            self._draw_entrance(ctx, pos, color)
+
+        # Neon sign (service name) with flicker
+        if bw > 20:
+            self._draw_neon_sign(ctx, entity, pos, color, glow, now)
+
+        # Fire/smoke for critical
+        if state == "critical":
+            self._draw_fire_smoke(ctx, pos, now)
+
+    def _draw_floor_lines(self, ctx: Any, pos: dict, state: str) -> None:
+        """Horizontal floor separator lines for architectural detail."""
+        bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
+        floor_gap = max(12, bh / 6)
+        fy = by + floor_gap
+        try:
+            ctx.globalAlpha(0.2)
+            ctx.fillStyle("#2a2a4e")
+            while fy < by + bh - 8:
+                ctx.fillRect(bx + 1, fy, bw - 2, 1)
+                fy += floor_gap
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+    def _draw_windows(
+        self, ctx: Any, entity: dict, pos: dict, state: str, now: float
+    ) -> None:
+        """Draw window grid with individual lit/dark per window, state-based patterns."""
+        bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
+
+        win_w = max(3, min(5, bw / 8))
+        win_h = max(3, min(5, bh / 10))
+        gap_x = max(win_w + 2, bw / max(2, int(bw / 8)))
+        gap_y = max(win_h + 3, bh / max(2, int(bh / 8)))
+
+        # Seed per-entity for consistent window pattern
+        entity_seed = hash(entity.get("id", "x")) % 10000
+
+        wy = by + 5
+        row = 0
+        while wy < by + bh - 8:
+            wx = bx + 3
+            col = 0
+            while wx < bx + bw - 5:
+                # Deterministic per-window random based on position + entity
+                win_hash = (entity_seed + row * 31 + col * 17) % 100
+
+                if state == "stopped":
+                    # All dark, maybe one security light
+                    if win_hash < 5:
+                        ctx.fillStyle("#334455")
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                elif state == "healthy":
+                    # Warm yellow, some flickering off
+                    if win_hash < 15:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_HEALTHY)
+                        # Subtle flicker
+                        if win_hash < 20:
+                            flicker = 0.6 + 0.4 * math.sin(now * 6 + win_hash)
+                            try:
+                                ctx.globalAlpha(flicker)
+                            except (AttributeError, TypeError):
+                                pass
+                elif state == "running":
+                    # Blue-tinted windows, most lit
+                    if win_hash < 10:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                    else:
+                        ctx.fillStyle("#88bbff")
+                elif state == "warning":
+                    # Orange pulsing, some dark
+                    pulse = 0.5 + 0.5 * math.sin(now * 4 + row * 0.5)
+                    if win_hash < 25:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_WARNING)
+                        try:
+                            ctx.globalAlpha(0.5 + 0.5 * pulse)
+                        except (AttributeError, TypeError):
+                            pass
+                elif state == "critical":
+                    # Red strobe
+                    strobe = 0.5 + 0.5 * math.sin(now * 8 + col * 1.2)
+                    if win_hash < 30:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_CRITICAL)
+                        try:
+                            ctx.globalAlpha(0.4 + 0.6 * strobe)
+                        except (AttributeError, TypeError):
+                            pass
+                else:
+                    # Unknown/idle — dim
+                    if win_hash < 60:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                    else:
+                        ctx.fillStyle("#334455")
+
+                # Window frame (subtle border)
+                ctx.fillRect(wx, wy, win_w, win_h)
+
+                # Reset alpha
+                try:
+                    ctx.globalAlpha(1.0)
+                except (AttributeError, TypeError):
+                    pass
+
+                wx += gap_x
+                col += 1
+            wy += gap_y
+            row += 1
+
+    def _draw_roof_details(self, ctx: Any, pos: dict, state: str, now: float) -> None:
+        """Roof mechanicals: HVAC units, antenna, satellite dish."""
+        bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
+        roof_y = by
+
+        # HVAC unit(s) — small rectangles on roof
+        hvac_w = max(3, bw * 0.12)
+        hvac_h = max(2, min(5, bh * 0.05))
+        ctx.fillStyle("#2a2a40")
+        ctx.fillRect(bx + bw * 0.15, roof_y - hvac_h, hvac_w, hvac_h)
+        if bw > 30:
+            ctx.fillRect(bx + bw * 0.6, roof_y - hvac_h, hvac_w, hvac_h)
+
+        # Antenna — thin vertical line
+        if bw > 20:
+            antenna_x = bx + bw * 0.5
+            antenna_h = max(6, bh * 0.08)
+            ctx.fillStyle("#3a3a5a")
+            ctx.fillRect(antenna_x, roof_y - hvac_h - antenna_h, 1, antenna_h)
+
+            # Blinking light on antenna tip
+            blink = math.sin(now * 3) > 0.3
+            if blink:
+                try:
+                    ctx.globalAlpha(0.9)
+                    ctx.fillStyle("#ff2222" if state == "critical" else "#ff4444")
+                    ctx.fillRect(antenna_x - 1, roof_y - hvac_h - antenna_h - 1, 2, 2)
+                    ctx.globalAlpha(1.0)
+                except (AttributeError, TypeError):
+                    pass
+
+        # Satellite dish (for wider buildings)
+        if bw > 40:
+            dish_x = bx + bw * 0.8
+            dish_y = roof_y - hvac_h - 2
+            try:
+                ctx.globalAlpha(0.6)
+                ctx.fillStyle("#3a3a5a")
+                # Simple dish shape — small triangle/arc approximation
+                ctx.fillRect(dish_x, dish_y - 3, 5, 1)
+                ctx.fillRect(dish_x + 1, dish_y - 2, 3, 1)
+                ctx.fillRect(dish_x + 2, dish_y - 1, 1, 2)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+    def _draw_entrance(self, ctx: Any, pos: dict, color: str) -> None:
+        """Ground floor entrance with awning."""
+        bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
+        ground_y = by + bh
+
+        # Door
+        door_w = max(4, bw * 0.15)
+        door_h = max(5, min(10, bh * 0.1))
+        door_x = bx + (bw - door_w) / 2
+        door_y = ground_y - door_h
+
+        ctx.fillStyle("#0a0a18")
+        ctx.fillRect(door_x, door_y, door_w, door_h)
+
+        # Awning — small triangle/overhang above door
+        awning_w = door_w + 4
+        awning_x = door_x - 2
+        awning_y = door_y - 2
+        try:
+            ctx.globalAlpha(0.5)
+            ctx.fillStyle(color)
+            ctx.fillRect(awning_x, awning_y, awning_w, 2)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Light spill from entrance
+        try:
+            ctx.globalAlpha(0.08)
+            ctx.fillStyle(color)
+            ctx.fillRect(door_x - 2, ground_y - 1, door_w + 4, 3)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+    def _draw_neon_sign(
+        self, ctx: Any, entity: dict, pos: dict, color: str, glow: str, now: float
+    ) -> None:
+        """Neon sign with building name, glow, and subtle flicker."""
+        name = entity.get("name", "")[:12]
+        sign_w = min(pos["w"] + 6, len(name) * 7 + 8)
+        sign_h = 14
+        sign_x = pos["x"] + (pos["w"] - sign_w) / 2
+        sign_y = pos["y"] - sign_h - 2
+
+        if sign_y < 0:
+            sign_y = pos["y"] + 2
+
+        # Sign background
+        ctx.fillStyle(NEON_SIGN_BG)
+        ctx.fillRect(sign_x, sign_y, sign_w, sign_h)
+
+        # Neon border with glow
+        try:
+            ctx.shadowBlur(6)
+            ctx.shadowColor(glow)
+        except (AttributeError, TypeError):
+            pass
+
+        ctx.strokeStyle(color)
+        ctx.lineWidth(1)
+        ctx.strokeRect(sign_x, sign_y, sign_w, sign_h)
+
+        # Text with subtle flicker
+        flicker = 0.85 + 0.15 * math.sin(now * 12 + hash(entity.get("id", "")) % 10)
+        try:
+            ctx.globalAlpha(flicker)
+        except (AttributeError, TypeError):
+            pass
+
+        ctx.fillStyle(color)
+        ctx.font("bold 9px 'Courier New', monospace")
+        ctx.fillText(name, sign_x + 4, sign_y + 10)
+
+        try:
+            ctx.globalAlpha(1.0)
+            ctx.shadowBlur(0)
+        except (AttributeError, TypeError):
+            pass
+
+    def _draw_fire_smoke(self, ctx: Any, pos: dict, now: float) -> None:
+        """Fire and smoke particles for critical buildings."""
+        fire_colors = ["#ff4400", "#ff6600", "#ffaa00", "#ff2200"]
+        for i in range(5):
+            fx = pos["x"] + self._rng.uniform(0, pos["w"])
+            fy = pos["y"] - self._rng.uniform(2, 12)
+            phase = math.sin(now * 8 + i * 1.3)
+            fy += phase * 3
+            fc = fire_colors[i % len(fire_colors)]
+            try:
+                ctx.globalAlpha(0.6 + 0.3 * abs(phase))
+                ctx.fillStyle(fc)
+                ctx.fillRect(fx, fy, 3, 4)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+        # Smoke above fire
+        smoke_y = pos["y"] - 15
+        for i in range(3):
+            sx = pos["x"] + pos["w"] / 2 + math.sin(now * 2 + i) * 8
+            sy = smoke_y - i * 6 + math.sin(now * 3 + i * 0.7) * 2
+            try:
+                ctx.globalAlpha(0.2 - i * 0.05)
+                ctx.fillStyle("#444444")
+                ctx.fillRect(sx - 4, sy, 8, 5)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+    # ------------------------------------------------------------------
+    # Layer 4: Rain
+    # ------------------------------------------------------------------
+
+    def _draw_rain(self, ctx: Any) -> None:
+        """Vertical semi-transparent rain lines."""
+        for drop in self._rain:
+            drop.draw(ctx)
+
+    # ------------------------------------------------------------------
+    # Layer 2b: Ground reflections (wet road, mirrored building glow)
+    # ------------------------------------------------------------------
+
+    def _draw_ground_reflections(
+        self, ctx: Any, entities: list, layout: dict, w: int, h: int, now: float
+    ) -> None:
+        """Wet road effect — mirrored building glow on road surface."""
+        ground_y = h - 50
+        road_y = ground_y + 5
+        road_h = h - road_y
+
+        # Overall wet shimmer
+        shimmer = math.sin(now * 1.5)
+        try:
+            ctx.globalAlpha(0.04 + 0.02 * shimmer)
+            ctx.fillStyle("#4488ff")
+            ctx.fillRect(0, road_y, w, road_h)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Mirrored glow from each building
+        for entity in entities:
+            if entity.get("type", "") != "service":
+                continue
+            pos = layout.get(entity["id"])
+            if not pos:
+                continue
+            state = entity.get("state", "unknown")
+            color = STATE_COLORS.get(state, STATE_COLORS["unknown"])
+
+            # Reflection directly below building
+            ref_x = pos["x"]
+            ref_w = pos["w"]
+            ref_y = road_y + 2
+            ref_h = min(road_h - 4, pos["h"] * 0.3)
+
+            try:
+                ctx.globalAlpha(0.05 + 0.02 * math.sin(now * 2 + pos["x"] * 0.01))
+                ctx.fillStyle(color)
+                ctx.fillRect(ref_x, ref_y, ref_w, ref_h)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+        # Neon reflections on wet road
+        reflection_colors = ["#ff00ff", "#00ffff", "#ffff00"]
+        for i, rc in enumerate(reflection_colors):
+            rx = (w / (len(reflection_colors) + 1)) * (i + 1)
+            rw = 40 + 20 * math.sin(now * 2 + i)
+            try:
+                ctx.globalAlpha(0.06 + 0.03 * math.sin(now * 3 + i * 1.5))
+                ctx.fillStyle(rc)
+                ctx.fillRect(rx - rw / 2, road_y + 5, rw, road_h - 10)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
+    # ------------------------------------------------------------------
+    # District / Block drawing
+    # ------------------------------------------------------------------
 
     def _draw_district(self, ctx: Any, entity: dict, pos: dict) -> None:
         """District border with neon glow."""
         color = STATE_COLORS.get(entity.get("state", "unknown"), STATE_COLORS["unknown"])
         glow = NEON_GLOW.get(entity.get("state", "unknown"), NEON_GLOW["unknown"])
 
-        # Neon glow border
         try:
             ctx.shadowBlur(12)
             ctx.shadowColor(glow)
@@ -349,196 +1045,6 @@ class CityRenderer(MetaphorRenderer):
         ctx.fillStyle("#4a4a6a")
         ctx.font("10px 'Courier New', monospace")
         ctx.fillText(entity.get("name", "")[:16], pos["x"] + 4, pos["y"] + 14)
-
-    def _draw_building(
-        self, ctx: Any, entity: dict, pos: dict, now: float
-    ) -> None:
-        """Building with neon cyberpunk details."""
-        state = entity.get("state", "unknown")
-        color = STATE_COLORS.get(state, STATE_COLORS["unknown"])
-        glow = NEON_GLOW.get(state, NEON_GLOW["unknown"])
-
-        # Building body — dark with colored accent
-        body_color = self._darken(color, 0.3)
-        ctx.fillStyle(body_color)
-        ctx.fillRect(pos["x"], pos["y"], pos["w"], pos["h"])
-
-        # Building outline with neon glow
-        try:
-            if state == "warning":
-                # Pulsing glow for warning
-                pulse = 0.5 + 0.5 * math.sin(now * 4)
-                ctx.shadowBlur(6 + 10 * pulse)
-            elif state == "critical":
-                ctx.shadowBlur(15)
-            else:
-                ctx.shadowBlur(4)
-            ctx.shadowColor(glow)
-        except (AttributeError, TypeError):
-            pass
-
-        ctx.strokeStyle(color)
-        ctx.lineWidth(1.5)
-        ctx.strokeRect(pos["x"], pos["y"], pos["w"], pos["h"])
-
-        try:
-            ctx.shadowBlur(0)
-        except (AttributeError, TypeError):
-            pass
-
-        # Windows
-        if pos["h"] > 25 and pos["w"] > 14:
-            self._draw_windows(ctx, entity, pos, state)
-
-        # Neon sign (service name)
-        if pos["w"] > 20:
-            self._draw_neon_sign(ctx, entity, pos, color, glow)
-
-        # Fire/smoke for critical
-        if state == "critical":
-            self._draw_fire_smoke(ctx, pos, now)
-
-    def _draw_windows(
-        self, ctx: Any, entity: dict, pos: dict, state: str
-    ) -> None:
-        """Draw window grid on building."""
-        win_w = 4
-        win_h = 4
-        gap_x = 8
-        gap_y = 10
-
-        if state in ("healthy", "running"):
-            win_color = WINDOW_COLOR_HEALTHY
-        elif state == "warning":
-            win_color = WINDOW_COLOR_WARNING
-        elif state == "critical":
-            win_color = "#ff4444"
-        else:
-            win_color = WINDOW_COLOR_OFF
-
-        wy = pos["y"] + 6
-        while wy < pos["y"] + pos["h"] - 8:
-            wx = pos["x"] + 4
-            while wx < pos["x"] + pos["w"] - 6:
-                # Some windows randomly off for realism
-                is_lit = state not in ("stopped", "unknown")
-                if is_lit and self._rng.random() < 0.15:
-                    ctx.fillStyle(WINDOW_COLOR_OFF)
-                else:
-                    ctx.fillStyle(win_color)
-                ctx.fillRect(wx, wy, win_w, win_h)
-                wx += gap_x
-            wy += gap_y
-
-    def _draw_neon_sign(
-        self, ctx: Any, entity: dict, pos: dict, color: str, glow: str
-    ) -> None:
-        """Neon sign above or on building."""
-        name = entity.get("name", "")[:12]
-        sign_w = min(pos["w"] + 6, len(name) * 7 + 8)
-        sign_h = 14
-        sign_x = pos["x"] + (pos["w"] - sign_w) / 2
-        sign_y = pos["y"] - sign_h - 2
-
-        if sign_y < 0:
-            sign_y = pos["y"] + 2
-
-        # Sign background
-        ctx.fillStyle(NEON_SIGN_BG)
-        ctx.fillRect(sign_x, sign_y, sign_w, sign_h)
-
-        # Neon border
-        try:
-            ctx.shadowBlur(6)
-            ctx.shadowColor(glow)
-        except (AttributeError, TypeError):
-            pass
-
-        ctx.strokeStyle(color)
-        ctx.lineWidth(1)
-        ctx.strokeRect(sign_x, sign_y, sign_w, sign_h)
-
-        # Text
-        ctx.fillStyle(color)
-        ctx.font("bold 9px 'Courier New', monospace")
-        ctx.fillText(name, sign_x + 4, sign_y + 10)
-
-        try:
-            ctx.shadowBlur(0)
-        except (AttributeError, TypeError):
-            pass
-
-    def _draw_fire_smoke(self, ctx: Any, pos: dict, now: float) -> None:
-        """Fire and smoke particles for critical buildings."""
-        # Fire at base
-        fire_colors = ["#ff4400", "#ff6600", "#ffaa00", "#ff2200"]
-        for i in range(5):
-            fx = pos["x"] + self._rng.uniform(0, pos["w"])
-            fy = pos["y"] - self._rng.uniform(2, 12)
-            phase = math.sin(now * 8 + i * 1.3)
-            fy += phase * 3
-            fc = fire_colors[i % len(fire_colors)]
-            try:
-                ctx.globalAlpha(0.6 + 0.3 * abs(phase))
-                ctx.fillStyle(fc)
-                ctx.fillRect(fx, fy, 3, 4)
-                ctx.globalAlpha(1.0)
-            except (AttributeError, TypeError):
-                pass
-
-        # Smoke above fire
-        smoke_y = pos["y"] - 15
-        for i in range(3):
-            sx = pos["x"] + pos["w"] / 2 + math.sin(now * 2 + i) * 8
-            sy = smoke_y - i * 6 + math.sin(now * 3 + i * 0.7) * 2
-            try:
-                ctx.globalAlpha(0.2 - i * 0.05)
-                ctx.fillStyle("#444444")
-                ctx.fillRect(sx - 4, sy, 8, 5)
-                ctx.globalAlpha(1.0)
-            except (AttributeError, TypeError):
-                pass
-
-    def _draw_roads(self, ctx: Any, w: int, h: int, now: float) -> None:
-        """Road strip at bottom with rain-slicked reflections."""
-        road_y = h - 40
-        road_h = 40
-
-        # Road surface
-        ctx.fillStyle(ROAD_COLOR)
-        ctx.fillRect(0, road_y, w, road_h)
-
-        # Road lines
-        ctx.strokeStyle("#2a2a4a")
-        ctx.lineWidth(1)
-        line_y = road_y + road_h / 2
-        dash_x = 0
-        while dash_x < w:
-            ctx.fillRect(dash_x, line_y, 20, 1)
-            dash_x += 40
-
-        # Rain-slicked reflections (shimmer)
-        shimmer_phase = math.sin(now * 1.5)
-        try:
-            ctx.globalAlpha(0.04 + 0.02 * shimmer_phase)
-            ctx.fillStyle("#4488ff")
-            ctx.fillRect(0, road_y, w, road_h)
-            ctx.globalAlpha(1.0)
-        except (AttributeError, TypeError):
-            pass
-
-        # Neon reflections on wet road
-        reflection_colors = ["#ff00ff", "#00ffff", "#ffff00"]
-        for i, rc in enumerate(reflection_colors):
-            rx = (w / (len(reflection_colors) + 1)) * (i + 1)
-            rw = 40 + 20 * math.sin(now * 2 + i)
-            try:
-                ctx.globalAlpha(0.06 + 0.03 * math.sin(now * 3 + i * 1.5))
-                ctx.fillStyle(rc)
-                ctx.fillRect(rx - rw / 2, road_y + 5, rw, road_h - 10)
-                ctx.globalAlpha(1.0)
-            except (AttributeError, TypeError):
-                pass
 
     # ------------------------------------------------------------------
     # Utilities
@@ -613,5 +1119,17 @@ class CityRenderer(MetaphorRenderer):
                 "neon_signs",
                 "building_height_cpu",
                 "building_width_memory",
+                "sky_stars",
+                "far_buildings_skyline",
+                "road_network",
+                "crosswalks",
+                "traffic_lights",
+                "rain_effect",
+                "ground_reflections",
+                "architectural_detail",
+                "window_patterns",
+                "roof_mechanicals",
+                "entrance_awning",
+                "antenna_blink",
             ],
         }
