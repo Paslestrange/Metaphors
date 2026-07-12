@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.hermes
+tests
+docs
+*.md
+!README.md
+.gitignore
+.env
+.env.*
+!.env.example
+Makefile
+install.sh
