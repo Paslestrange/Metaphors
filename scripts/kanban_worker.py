@@ -388,6 +388,10 @@ def main():
 
     pushed = git_push()
 
+    # Capture screenshot for visual verification
+    screenshot_path = WORKSPACE / "screenshots" / f"shipped_{re.sub(r[^a-zA-Z0-9], '_', title)[:40]}.png"
+    run(f"python3 scripts/screenshot.py --output {screenshot_path} --wait 4", workdir=WORKSPACE, timeout=30)
+
     # Restart service to pick up changes
     restarted = restart_service()
     app_running = check_service_running()
