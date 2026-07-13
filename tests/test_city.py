@@ -456,4 +456,8 @@ class TestTrafficParticle:
         p = TrafficParticle(100, 570, 570, 50, "#ff00ff")
         ctx = MockCtx()
         p.draw(ctx)
-        assert any(c[0] == "fillRect" for c in ctx.calls)
+        # New draw uses arc+fill, not fillRect
+        assert any(c[0] == "arc" for c in ctx.calls)
+        assert any(c[0] == "fill" for c in ctx.calls)
+        assert any(c[0] == "arc" for c in ctx.calls)
+        assert any(c[0] == "fill" for c in ctx.calls)

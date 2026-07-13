@@ -1142,6 +1142,11 @@ canvas.addEventListener('mousedown', (e) => {
         panStartY = mouseY;
         panOffsetX = panX;
         panOffsetY = panY;
+        // Cancel any ongoing animation and sync targets to current position
+        animatingView = false;
+        targetZoom = zoom;
+        targetPanX = panX;
+        targetPanY = panY;
         canvas.style.cursor = 'grabbing';
         e.preventDefault();
     } else if (e.button === 1) { // Middle mouse button
@@ -1151,6 +1156,11 @@ canvas.addEventListener('mousedown', (e) => {
         panStartY = mouseY;
         panOffsetX = panX;
         panOffsetY = panY;
+        // Cancel any ongoing animation and sync targets to current position
+        animatingView = false;
+        targetZoom = zoom;
+        targetPanX = panX;
+        targetPanY = panY;
         canvas.style.cursor = 'grabbing';
         e.preventDefault();
     }
