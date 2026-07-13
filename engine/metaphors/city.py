@@ -737,6 +737,18 @@ class CityRenderer(MetaphorRenderer):
         except (AttributeError, TypeError):
             pass
 
+        # Roof cornice — visible ledge at building top
+        if bh > 20 and bw > 14:
+            try:
+                ctx.fillStyle("#222244")
+                ctx.fillRect(bx - 1, by - 2, bw + 2, 3)  # slight overhang
+                ctx.globalAlpha(0.3)
+                ctx.fillStyle("#3a3a5e")
+                ctx.fillRect(bx - 1, by - 3, bw + 2, 1)  # lighter top edge
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+
         # Floor separators
         if bh > 30 and bw > 14:
             self._draw_floor_lines(ctx, pos, state)
@@ -939,16 +951,16 @@ class CityRenderer(MetaphorRenderer):
         hvac_w = max(3, bw * 0.12)
         hvac_h = max(2, min(5, bh * 0.05))
         ctx.fillStyle("#2a2a40")
-        ctx.fillRect(bx + bw * 0.15, roof_y - hvac_h, hvac_w, hvac_h)
+        ctx.fillRect(bx + bw * 0.15, roof_y - 3 - hvac_h, hvac_w, hvac_h)
         if bw > 30:
-            ctx.fillRect(bx + bw * 0.6, roof_y - hvac_h, hvac_w, hvac_h)
+            ctx.fillRect(bx + bw * 0.6, roof_y - 3 - hvac_h, hvac_w, hvac_h)
 
-        # Antenna — thin vertical line
-        if bw > 20:
+        # Antenna — only on tall buildings (>100px height)
+        if bh > 100 and bw > 20:
             antenna_x = bx + bw * 0.5
             antenna_h = max(6, bh * 0.08)
             ctx.fillStyle("#3a3a5a")
-            ctx.fillRect(antenna_x, roof_y - hvac_h - antenna_h, 1, antenna_h)
+            ctx.fillRect(antenna_x, roof_y - 3 - hvac_h - antenna_h, 1, antenna_h)
 
             # Blinking light on antenna tip
             blink = math.sin(now * 3) > 0.3
@@ -956,7 +968,7 @@ class CityRenderer(MetaphorRenderer):
                 try:
                     ctx.globalAlpha(0.9)
                     ctx.fillStyle("#ff2222" if state == "critical" else "#ff4444")
-                    ctx.fillRect(antenna_x - 1, roof_y - hvac_h - antenna_h - 1, 2, 2)
+                    ctx.fillRect(antenna_x - 1, roof_y - 3 - hvac_h - antenna_h - 1, 2, 2)
                     ctx.globalAlpha(1.0)
                 except (AttributeError, TypeError):
                     pass
@@ -964,7 +976,7 @@ class CityRenderer(MetaphorRenderer):
         # Satellite dish (for wider buildings)
         if bw > 40:
             dish_x = bx + bw * 0.8
-            dish_y = roof_y - hvac_h - 2
+            dish_y = roof_y - 3 - hvac_h - 2
             try:
                 ctx.globalAlpha(0.6)
                 ctx.fillStyle("#3a3a5a")
@@ -977,36 +989,56 @@ class CityRenderer(MetaphorRenderer):
                 pass
 
     def _draw_entrance(self, ctx: Any, pos: dict, color: str) -> None:
-        """Ground floor entrance with awning."""
+        """Ground floor entrance with awning and double doors."""
         bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
         ground_y = by + bh
 
-        # Door
-        door_w = max(4, bw * 0.15)
-        door_h = max(5, min(10, bh * 0.1))
+        # Door dimensions
+        door_w = max(6, bw * 0.2)
+        door_h = max(6, min(12, bh * 0.12))
         door_x = bx + (bw - door_w) / 2
         door_y = ground_y - door_h
 
-        ctx.fillStyle("#0a0a18")
-        ctx.fillRect(door_x, door_y, door_w, door_h)
+        # Door frame (slightly larger than doors)
+        ctx.fillStyle("#1a1a30")
+        ctx.fillRect(door_x - 1, door_y - 1, door_w + 2, door_h + 1)
 
-        # Awning — small triangle/overhang above door
-        awning_w = door_w + 4
-        awning_x = door_x - 2
-        awning_y = door_y - 2
+        # Double doors — two panels with center divider
+        half_w = door_w / 2 - 0.5
+        ctx.fillStyle("#0a0a18")
+        ctx.fillRect(door_x, door_y, half_w, door_h)
+        ctx.fillRect(door_x + half_w + 1, door_y, half_w, door_h)
+
+        # Door handles (tiny bright dots)
         try:
-            ctx.globalAlpha(0.5)
             ctx.fillStyle(color)
-            ctx.fillRect(awning_x, awning_y, awning_w, 2)
+            ctx.globalAlpha(0.7)
+            ctx.fillRect(door_x + half_w - 1.5, door_y + door_h * 0.55, 1, 1)
+            ctx.fillRect(door_x + half_w + 1.5, door_y + door_h * 0.55, 1, 1)
             ctx.globalAlpha(1.0)
         except (AttributeError, TypeError):
             pass
 
-        # Light spill from entrance
+        # Awning — wider overhang with angled front edge
+        awning_w = door_w + 8
+        awning_x = door_x - 4
+        awning_y = door_y - 4
         try:
-            ctx.globalAlpha(0.08)
+            ctx.globalAlpha(0.4)
             ctx.fillStyle(color)
-            ctx.fillRect(door_x - 2, ground_y - 1, door_w + 4, 3)
+            ctx.fillRect(awning_x, awning_y, awning_w, 2)
+            # Angled front lip
+            ctx.globalAlpha(0.25)
+            ctx.fillRect(awning_x + 1, awning_y + 2, awning_w - 2, 1)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Light spill from entrance onto ground
+        try:
+            ctx.globalAlpha(0.1)
+            ctx.fillStyle(color)
+            ctx.fillRect(door_x - 3, ground_y - 1, door_w + 6, 4)
             ctx.globalAlpha(1.0)
         except (AttributeError, TypeError):
             pass

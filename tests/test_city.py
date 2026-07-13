@@ -84,6 +84,15 @@ class MockCtx:
     def globalAlpha(self, v):
         self.calls.append(("globalAlpha", v))
 
+    def beginPath(self):
+        self.calls.append(("beginPath",))
+
+    def arc(self, *a):
+        self.calls.append(("arc", a))
+
+    def fill(self):
+        self.calls.append(("fill",))
+
 
 # ---------------------------------------------------------------------------
 # Layout tests

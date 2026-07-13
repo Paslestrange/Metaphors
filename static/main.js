@@ -780,6 +780,17 @@ function connect() {
             render();
             updateStats();
             _ensureAnimLoop();
+            // Refresh detail panel if an entity is selected (real-time update)
+            if (selectedEntity) {
+                const updated = entities.find(en => en.id === selectedEntity.id);
+                if (updated) {
+                    selectedEntity = updated;
+                    showDetailPanel(updated);
+                } else {
+                    selectedEntity = null;
+                    showDetailPlaceholder();
+                }
+            }
         }
     };
     ws.onclose = () => setTimeout(connect, 3000);
@@ -861,7 +872,31 @@ function _animLoop(ts) {
     // Throttle to ~30fps for city animation
     if (ts - _lastAnimTime < 33) return;
     _lastAnimTime = ts;
-    if (currentMetaphor === 'city' && entities.length) {
+    
+    // Smooth zoom/pan animation
+    if (animatingView && !isPanning) {
+        const epsilon = 0.001;
+        const dz = targetZoom - zoom;
+        const dx = targetPanX - panX;
+        const dy = targetPanY - panY;
+        
+        if (Math.abs(dz) > epsilon || Math.abs(dx) > epsilon || Math.abs(dy) > epsilon) {
+            // Lerp toward targets
+            zoom += dz * LERP_SPEED;
+            panX += dx * LERP_SPEED;
+            panY += dy * LERP_SPEED;
+        } else {
+            // Snap to target
+            zoom = targetZoom;
+            panX = targetPanX;
+            panY = targetPanY;
+            animatingView = false;
+        }
+    }
+    
+    // Always render when animating or when city needs animation frames
+    const needsRender = animatingView || isPanning || (currentMetaphor === 'city' && entities.length);
+    if (needsRender) {
         render();
     }
 }
@@ -1067,8 +1102,14 @@ canvas.addEventListener('mousemove', (e) => {
     mouseY = e.clientY - rect.top;
 
     if (isPanning) {
-        panX = panOffsetX + (mouseX - panStartX);
-        panY = panOffsetY + (mouseY - panStartY);
+        const dx = mouseX - panStartX;
+        const dy = mouseY - panStartY;
+        // Mark as dragged if moved more than 3 pixels
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+            hasDragged = true;
+        }
+        panX = panOffsetX + dx;
+        panY = panOffsetY + dy;
         render();
         return;
     }
@@ -1085,15 +1126,27 @@ canvas.addEventListener('mousemove', (e) => {
             break;
         }
     }
-    canvas.style.cursor = hoveredEntity ? 'pointer' : 'default';
+    canvas.style.cursor = hoveredEntity ? 'pointer' : 'grab';
     if (hoveredEntity !== prevHover) {
         render();
     }
 });
 
 canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    if (e.button === 0) { // Left mouse button
         isPanning = true;
+        hasDragged = false;
+        mouseDownX = mouseX;
+        mouseDownY = mouseY;
+        panStartX = mouseX;
+        panStartY = mouseY;
+        panOffsetX = panX;
+        panOffsetY = panY;
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+    } else if (e.button === 1) { // Middle mouse button
+        isPanning = true;
+        hasDragged = false;
         panStartX = mouseX;
         panStartY = mouseY;
         panOffsetX = panX;
@@ -1106,12 +1159,20 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', (e) => {
     if (isPanning) {
         isPanning = false;
-        canvas.style.cursor = hoveredEntity ? 'pointer' : 'default';
+        canvas.style.cursor = hoveredEntity ? 'pointer' : 'grab';
+    }
+});
+
+canvas.addEventListener('mouseleave', (e) => {
+    if (isPanning) {
+        isPanning = false;
+        canvas.style.cursor = 'grab';
     }
 });
 
 canvas.addEventListener('click', (e) => {
-    if (isPanning) return;
+    // Ignore if user was dragging
+    if (hasDragged) return;
     if (hoveredEntity) {
         selectedEntity = hoveredEntity;
         render();
@@ -1126,35 +1187,55 @@ canvas.addEventListener('click', (e) => {
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.max(0.2, Math.min(5.0, zoom * delta));
+    const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom * delta));
 
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
-    panX = cx - (cx - panX) * (newZoom / zoom);
-    panY = cy - (cy - panY) * (newZoom / zoom);
-    zoom = newZoom;
-    render();
+
+    // Calculate new pan to keep cursor position stable
+    const newPanX = cx - (cx - panX) * (newZoom / zoom);
+    const newPanY = cy - (cy - panY) * (newZoom / zoom);
+
+    // Animate to new values
+    targetZoom = newZoom;
+    targetPanX = newPanX;
+    targetPanY = newPanY;
+    animatingView = true;
 }, { passive: false });
 
 // ============================================================
 // Zoom controls
 // ============================================================
 document.getElementById('zoom-in').addEventListener('click', () => {
-    zoom = Math.min(5.0, zoom * 1.25);
-    render();
+    targetZoom = Math.min(ZOOM_MAX, zoom * 1.25);
+    // Zoom centered on canvas center
+    const W = canvas.width / DPR;
+    const H = canvas.height / DPR;
+    const cx = W / 2;
+    const cy = H / 2;
+    targetPanX = cx - (cx - panX) * (targetZoom / zoom);
+    targetPanY = cy - (cy - panY) * (targetZoom / zoom);
+    animatingView = true;
 });
 
 document.getElementById('zoom-out').addEventListener('click', () => {
-    zoom = Math.max(0.2, zoom * 0.8);
-    render();
+    targetZoom = Math.max(ZOOM_MIN, zoom * 0.8);
+    // Zoom centered on canvas center
+    const W = canvas.width / DPR;
+    const H = canvas.height / DPR;
+    const cx = W / 2;
+    const cy = H / 2;
+    targetPanX = cx - (cx - panX) * (targetZoom / zoom);
+    targetPanY = cy - (cy - panY) * (targetZoom / zoom);
+    animatingView = true;
 });
 
 document.getElementById('zoom-reset').addEventListener('click', () => {
-    zoom = 1.0;
-    panX = 0;
-    panY = 0;
-    render();
+    targetZoom = 1.0;
+    targetPanX = 0;
+    targetPanY = 0;
+    animatingView = true;
 });
 
 // ============================================================
@@ -1163,8 +1244,6 @@ document.getElementById('zoom-reset').addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
     // Don't capture when typing in inputs
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-
-    const PAN_STEP = 40;
 
     switch (e.key) {
         // Number keys 1-9: switch metaphor
@@ -1177,35 +1256,57 @@ document.addEventListener('keydown', (e) => {
             break;
         }
 
-        // +/- for zoom
-        case '+': case '=':
-            zoom = Math.min(5.0, zoom * 1.25);
-            render();
+        // +/- for zoom (animated, centered)
+        case '+': case '=': {
+            const W = canvas.width / DPR;
+            const H = canvas.height / DPR;
+            const cx = W / 2;
+            const cy = H / 2;
+            targetZoom = Math.min(ZOOM_MAX, zoom * 1.25);
+            targetPanX = cx - (cx - panX) * (targetZoom / zoom);
+            targetPanY = cy - (cy - panY) * (targetZoom / zoom);
+            animatingView = true;
             break;
-        case '-': case '_':
-            zoom = Math.max(0.2, zoom * 0.8);
-            render();
+        }
+        case '-': case '_': {
+            const W = canvas.width / DPR;
+            const H = canvas.height / DPR;
+            const cx = W / 2;
+            const cy = H / 2;
+            targetZoom = Math.max(ZOOM_MIN, zoom * 0.8);
+            targetPanX = cx - (cx - panX) * (targetZoom / zoom);
+            targetPanY = cy - (cy - panY) * (targetZoom / zoom);
+            animatingView = true;
             break;
+        }
 
-        // Arrow keys for pan
+        // Arrow keys for pan (animated)
         case 'ArrowLeft':
-            panX += PAN_STEP;
-            render();
+            targetPanX = panX + PAN_STEP;
+            targetPanY = panY;
+            targetZoom = zoom;
+            animatingView = true;
             e.preventDefault();
             break;
         case 'ArrowRight':
-            panX -= PAN_STEP;
-            render();
+            targetPanX = panX - PAN_STEP;
+            targetPanY = panY;
+            targetZoom = zoom;
+            animatingView = true;
             e.preventDefault();
             break;
         case 'ArrowUp':
-            panY += PAN_STEP;
-            render();
+            targetPanX = panX;
+            targetPanY = panY + PAN_STEP;
+            targetZoom = zoom;
+            animatingView = true;
             e.preventDefault();
             break;
         case 'ArrowDown':
-            panY -= PAN_STEP;
-            render();
+            targetPanX = panX;
+            targetPanY = panY - PAN_STEP;
+            targetZoom = zoom;
+            animatingView = true;
             e.preventDefault();
             break;
 
@@ -1216,13 +1317,13 @@ document.addEventListener('keydown', (e) => {
             render();
             break;
 
-        // 0 or Home: reset view
+        // 0 or Home: reset view (animated)
         case '0':
         case 'Home':
-            zoom = 1.0;
-            panX = 0;
-            panY = 0;
-            render();
+            targetZoom = 1.0;
+            targetPanX = 0;
+            targetPanY = 0;
+            animatingView = true;
             break;
     }
 });
@@ -1250,6 +1351,33 @@ function showDetailPanel(entity) {
         <span class="detail-value">${entity.type}</span>
     </div>`;
 
+    // CPU usage with progress bar
+    const m = entity.metrics || {};
+    const cpu = m.cpu !== undefined ? m.cpu : m.cpu_pct;
+    if (cpu !== undefined) {
+        const cpuColor = cpu > 80 ? '#ef4444' : cpu > 60 ? '#fbbf24' : '#4ade80';
+        html += `<div class="detail-row detail-progress">
+            <span class="detail-key">CPU</span>
+            <span class="detail-value">${cpu.toFixed(1)}%</span>
+        </div>
+        <div class="detail-progress-bar">
+            <div class="detail-progress-fill" style="width:${cpu}%;background:${cpuColor};"></div>
+        </div>`;
+    }
+
+    // Memory usage with progress bar
+    const mem = m.mem !== undefined ? m.mem : m.mem_pct;
+    if (mem !== undefined) {
+        const memColor = mem > 80 ? '#ef4444' : mem > 60 ? '#fbbf24' : '#4ade80';
+        html += `<div class="detail-row detail-progress">
+            <span class="detail-key">Memory</span>
+            <span class="detail-value">${mem.toFixed(1)}%</span>
+        </div>
+        <div class="detail-progress-bar">
+            <div class="detail-progress-fill" style="width:${mem}%;background:${memColor};"></div>
+        </div>`;
+    }
+
     html += `<div class="detail-row">
         <span class="detail-key">ID</span>
         <span class="detail-value" style="font-family:monospace;font-size:10px;">${entity.id}</span>
@@ -1276,12 +1404,13 @@ function showDetailPanel(entity) {
         </div>`;
     }
 
-    const m = entity.metrics || {};
     const metricKeys = Object.keys(m);
-    if (metricKeys.length > 0) {
+    const skipMetrics = ['cpu', 'cpu_pct', 'mem', 'mem_pct'];
+    const otherMetrics = metricKeys.filter(k => !skipMetrics.includes(k));
+    if (otherMetrics.length > 0) {
         html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #374151;">
             <div style="font-weight:bold;font-size:11px;color:#9ca3af;margin-bottom:4px;">METRICS</div>`;
-        metricKeys.forEach(key => {
+        otherMetrics.forEach(key => {
             let val = m[key];
             if (typeof val === 'number' && !Number.isInteger(val)) {
                 val = val.toFixed(2);
@@ -1314,8 +1443,15 @@ function showDetailPanel(entity) {
     panel.classList.remove('hidden');
 }
 
+function showDetailPlaceholder() {
+    const title = document.getElementById('detail-title');
+    const body = document.getElementById('detail-body');
+    title.textContent = 'Entity Details';
+    body.innerHTML = '<div class="detail-placeholder">Click an entity for details</div>';
+}
+
 function hideDetailPanel() {
-    document.getElementById('detail-panel').classList.add('hidden');
+    showDetailPlaceholder();
 }
 
 document.getElementById('detail-close').addEventListener('click', () => {
@@ -1373,3 +1509,4 @@ function updateStats() {
 resize();
 fetchMetaphors();
 connect();
+showDetailPlaceholder();
