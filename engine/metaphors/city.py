@@ -336,14 +336,14 @@ class CityRenderer(MetaphorRenderer):
                     }
 
         self._layout = layout
-        self._init_scene(w, h)
+        self._init_scene(entities, w, h)
         return layout
 
     # ------------------------------------------------------------------
     # Scene initialization
     # ------------------------------------------------------------------
 
-    def _init_scene(self, w: int, h: int) -> None:
+    def _init_scene(self, entities: list[dict[str, Any]], w: int, h: int) -> None:
         """Initialize stars, far buildings, rain, traffic particles."""
         # Stars
         self._stars = []
@@ -376,20 +376,40 @@ class CityRenderer(MetaphorRenderer):
             self._rain.append(RainDrop(rx, ry, rs, rl))
 
         # Traffic particles
-        self._init_particles(w, h)
+        self._init_particles(entities, w, h)
         self._initialized = True
 
-    def _init_particles(self, w: int, h: int) -> None:
-        """Create traffic particles on the road strip."""
+    def _init_particles(self, entities: list[dict[str, Any]], w: int, h: int) -> None:
+        """Create traffic particles on the road strip.
+        
+        Density scales with entity count: more entities = more traffic.
+        Headlights (yellow/white) move right, taillights (red) move left.
+        """
         self._particles = []
         road_y = h - 30
-        n_particles = max(5, min(40, w // 30))
-        for _ in range(n_particles):
+        
+        # Density based on entity count: base + scale
+        n_entities = len(entities) if entities else 0
+        n_particles = min(80, 5 + int(n_entities * 0.3))
+        
+        # Split roughly 50/50 between headlights and taillights
+        n_headlights = n_particles // 2
+        n_taillights = n_particles - n_headlights
+        
+        # Headlights (moving right) - warm yellow/white
+        for _ in range(n_headlights):
             px = self._rng.uniform(0, w)
-            py = road_y + self._rng.uniform(-5, 15)
-            speed = self._rng.uniform(30, 120) * (1 if self._rng.random() > 0.5 else -1)
-            color = self._rng.choice(TRAFFIC_COLORS)
-            self._particles.append(TrafficParticle(px, py, road_y, speed, color))
+            py = road_y + self._rng.uniform(-3, 8)  # Upper lane
+            # Speed: 0.5-2px per frame at 60fps = 30-120 px/sec
+            speed = self._rng.uniform(30, 120)
+            self._particles.append(TrafficParticle(px, py, road_y, speed, 'right'))
+        
+        # Taillights (moving left) - red
+        for _ in range(n_taillights):
+            px = self._rng.uniform(0, w)
+            py = road_y + self._rng.uniform(8, 18)  # Lower lane
+            speed = self._rng.uniform(30, 120)
+            self._particles.append(TrafficParticle(px, py, road_y, -speed, 'left'))
 
     def _update_particles(self, dt: float, w: int, h: int) -> None:
         for p in self._particles:
@@ -457,36 +477,93 @@ class CityRenderer(MetaphorRenderer):
     # ------------------------------------------------------------------
 
     def _draw_sky(self, ctx: Any, w: int, h: int, now: float) -> None:
-        """Sky gradient from #0a0a1a (top) to #0d0d22 (horizon) + stars."""
-        # Base fill
+        """Sky gradient: #0a0a1a (top) -> #0d0d22 (horizon) -> #1a1a2e (ground glow).
+
+        Also renders: stars, moon glow, city haze (orange/purple neon tint).
+        """
+        # Layer 0a: Base sky fill -- deep dark blue-black
         ctx.fillStyle(BG_COLOR)
         ctx.fillRect(0, 0, w, h)
 
-        # Gradient bands (top dark → horizon slightly lighter)
-        n_bands = 8
-        for i in range(n_bands):
-            frac = i / n_bands
-            y = frac * h * 0.5
-            band_h = h * 0.5 / n_bands
-            alpha = 0.02 + frac * 0.06
+        # Layer 0b: Vertical gradient bands -- top -> horizon -> ground glow
+        #   Top (#0a0a1a) -> mid-sky (#0c0c20) -> horizon (#0d0d22) -> ground glow (#1a1a2e)
+        gradient_stops = [
+            (0.00, BG_COLOR,         0.0),   # top
+            (0.15, "#0b0b1e",        0.02),
+            (0.28, "#0c0c20",        0.04),
+            (0.40, BG_COLOR_HORIZON, 0.06),  # horizon band
+            (0.48, "#0f0f24",        0.08),
+            (0.55, "#141428",        0.10),
+            (0.62, "#1a1a2e",        0.12),  # ground glow zone
+            (0.70, "#1a1a2e",        0.08),  # fading ground glow
+        ]
+        for frac_val, color_val, alpha_val in gradient_stops:
+            y_pos = frac_val * h * 0.55
+            band_h = h * 0.55 / len(gradient_stops)
             try:
-                ctx.globalAlpha(alpha)
-                ctx.fillStyle(BG_COLOR_HORIZON)
-                ctx.fillRect(0, y, w, band_h)
+                ctx.globalAlpha(alpha_val)
+                ctx.fillStyle(color_val)
+                ctx.fillRect(0, y_pos, w, band_h + 2)  # +2 to avoid seams
                 ctx.globalAlpha(1.0)
             except (AttributeError, TypeError):
                 pass
 
-        # Subtle purple haze near horizon
+        # Layer 0c: Moon glow -- soft circular gradient upper-right area
+        #   Approximate with concentric overlapping fills, outer dim -> inner brighter
+        moon_cx = w * 0.78
+        moon_cy = h * 0.09
+        moon_r = min(w, h) * 0.18
+        moon_layers = 10
+        for i in range(moon_layers, 0, -1):
+            frac = i / moon_layers
+            rx = moon_r * frac
+            alpha = 0.015 + (1.0 - frac) * 0.04
+            try:
+                ctx.globalAlpha(alpha)
+                ctx.fillStyle("#8888cc")
+                ctx.fillRect(moon_cx - rx, moon_cy - rx * 0.6, rx * 2, rx * 1.2)
+                ctx.globalAlpha(1.0)
+            except (AttributeError, TypeError):
+                pass
+        # Moon core -- small bright disc
         try:
-            ctx.globalAlpha(0.08)
-            ctx.fillStyle("#1a0a3a")
-            ctx.fillRect(0, h * 0.25, w, h * 0.2)
+            ctx.globalAlpha(0.12)
+            ctx.fillStyle("#aaaadd")
+            core_r = moon_r * 0.12
+            ctx.fillRect(moon_cx - core_r, moon_cy - core_r * 0.6, core_r * 2, core_r * 1.2)
             ctx.globalAlpha(1.0)
         except (AttributeError, TypeError):
             pass
 
-        # Stars
+        # Layer 0d: City haze -- horizontal gradient at horizon (orange/purple neon tint)
+        #   Purple band (left-center)
+        haze_y = h * 0.38
+        haze_h = h * 0.14
+        try:
+            ctx.globalAlpha(0.07)
+            ctx.fillStyle("#2a0a4a")  # deep purple
+            ctx.fillRect(0, haze_y, w * 0.55, haze_h)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+        #   Orange band (right-center, from neon signs)
+        try:
+            ctx.globalAlpha(0.05)
+            ctx.fillStyle("#4a1a0a")  # deep orange
+            ctx.fillRect(w * 0.35, haze_y, w * 0.65, haze_h)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+        #   Blend strip -- purple-orange mix in middle
+        try:
+            ctx.globalAlpha(0.04)
+            ctx.fillStyle("#3a0a2a")  # magenta blend
+            ctx.fillRect(w * 0.25, haze_y + haze_h * 0.2, w * 0.5, haze_h * 0.6)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Layer 0e: Stars
         for star in self._stars:
             star.draw(ctx, now)
 
@@ -699,6 +776,36 @@ class CityRenderer(MetaphorRenderer):
         except (AttributeError, TypeError):
             pass
 
+    def _draw_ventilation_grilles(self, ctx: Any, pos: dict) -> None:
+        """Ventilation grilles on building sides — horizontal lines."""
+        bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
+        grille_h = bh * 0.3
+        grille_y = by + bh * 0.5
+
+        # Left side grille
+        try:
+            ctx.globalAlpha(0.15)
+            ctx.fillStyle("#3a3a5a")
+            for i in range(4):
+                gy = grille_y + i * 3
+                if gy < by + bh - 5:
+                    ctx.fillRect(bx + 2, gy, bw * 0.08, 1)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
+        # Right side grille
+        try:
+            ctx.globalAlpha(0.15)
+            ctx.fillStyle("#3a3a5a")
+            for i in range(4):
+                gy = grille_y + i * 3
+                if gy < by + bh - 5:
+                    ctx.fillRect(bx + bw * 0.9, gy, bw * 0.08, 1)
+            ctx.globalAlpha(1.0)
+        except (AttributeError, TypeError):
+            pass
+
     def _draw_windows(
         self, ctx: Any, entity: dict, pos: dict, state: str, now: float
     ) -> None:
@@ -800,8 +907,17 @@ class CityRenderer(MetaphorRenderer):
                     else:
                         ctx.fillStyle(WINDOW_COLOR_OFF)
 
-                # Draw the window
+                # Draw the window fill
                 ctx.fillRect(wx, wy, win_w, win_h)
+
+                # Window frame border (subtle outline for architectural detail)
+                try:
+                    ctx.globalAlpha(0.25)
+                    ctx.strokeStyle("#1a1a2e")
+                    ctx.lineWidth(0.5)
+                    ctx.strokeRect(wx, wy, win_w, win_h)
+                except (AttributeError, TypeError):
+                    pass
 
                 # Reset alpha for next window
                 try:
