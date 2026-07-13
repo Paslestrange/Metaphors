@@ -745,6 +745,207 @@ metaphorRenderers.forest = {
     }
 };
 
+
+// Traffic Light metaphor - Urban intersection with signal colors
+metaphorRenderers.traffic_light = {
+    computeLayout(entities, W, H) {
+        const layout = {};
+        const byId = {};
+        entities.forEach(e => byId[e.id] = e);
+        const roots = entities.filter(e => !e.parent);
+
+        const intersectionW = W / Math.max(roots.length, 1);
+        roots.forEach((root, i) => {
+            const ix = i * intersectionW;
+            layout[root.id] = { x: ix, y: 0, w: intersectionW, h: H };
+
+            const children = (root.children || []).map(id => byId[id]).filter(Boolean);
+            if (!children.length) return;
+            const laneW = (intersectionW - 20) / children.length;
+
+            children.forEach((child, li) => {
+                const lx = ix + 10 + li * laneW;
+                layout[child.id] = { x: lx, y: 10, w: laneW - 4, h: H - 20 };
+
+                const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
+                if (!grandchildren.length) return;
+
+                const lightH = Math.min(80, (H - 40) / grandchildren.length);
+                grandchildren.forEach((gc, gi) => {
+                    const cpu = (gc.metrics || {}).cpu || 50;
+                    const lightW = 20 + (laneW - 30) * (cpu / 100);
+                    const gx = lx + (laneW - lightW) / 2;
+                    const gy = 20 + gi * lightH;
+                    layout[gc.id] = { x: gx, y: gy, w: lightW, h: lightH - 8 };
+                });
+            });
+        });
+        return layout;
+    },
+
+    render(ctx, entities, layout, W, H, COLORS) {
+        ctx.fillStyle = '#1e1e1e';
+        ctx.fillRect(0, 0, W, H);
+
+        const TL_COLORS = {
+            healthy: '#22c55e', running: '#22c55e', idle: '#eab308',
+            warning: '#eab308', degraded: '#f97316', critical: '#ef4444',
+            stopped: '#6b7280', pending: '#a78bfa', scaling: '#06b6d4', unknown: '#4b5563',
+        };
+
+        entities.forEach(entity => {
+            const pos = layout[entity.id];
+            if (!pos) return;
+            const color = TL_COLORS[entity.state] || TL_COLORS.unknown;
+
+            if (entity.type === 'cluster') {
+                ctx.fillStyle = '#252525';
+                ctx.fillRect(pos.x + 2, pos.y + 2, pos.w - 4, pos.h - 4);
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillRect(pos.x + pos.w / 2 - 1, pos.y, 2, pos.h);
+                ctx.fillStyle = '#9ca3af';
+                ctx.font = "bold 13px monospace";
+                ctx.fillText(entity.name || '', pos.x + 8, pos.y + 18);
+            } else if (entity.type === 'node') {
+                ctx.fillStyle = '#2a2a2a';
+                ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
+                ctx.fillStyle = '#fbbf24';
+                let dy = pos.y + 10;
+                while (dy < pos.y + pos.h - 10) {
+                    ctx.fillRect(pos.x + pos.w / 2 - 1, dy, 2, 8);
+                    dy += 16;
+                }
+                ctx.fillStyle = '#6b7280';
+                ctx.font = "10px monospace";
+                ctx.fillText((entity.name || '').slice(0, 16), pos.x + 4, pos.y + 14);
+            } else if (entity.type === 'service') {
+                ctx.fillStyle = '#111827';
+                ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
+                ctx.strokeStyle = '#374151';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(pos.x, pos.y, pos.w, pos.h);
+                const cx = pos.x + pos.w / 2;
+                const cy = pos.y + pos.h / 2;
+                const radius = Math.min(pos.w, pos.h) / 3;
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = color;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#d1d5db';
+                ctx.font = "9px monospace";
+                ctx.fillText((entity.name || '').slice(0, 10), pos.x + 2, pos.y + pos.h + 12);
+            }
+        });
+    }
+};
+
+// Space Station metaphor - Deep space with orbital layout
+metaphorRenderers.space = {
+    computeLayout(entities, W, H) {
+        const layout = {};
+        const cx = W / 2;
+        const cy = H / 2;
+        const roots = entities.filter(e => !e.parent);
+        const byId = {};
+        entities.forEach(e => byId[e.id] = e);
+
+        roots.forEach((root, i) => {
+            const orbitR = 80 + i * 90;
+            const angle = (i / Math.max(roots.length, 1)) * Math.PI * 2;
+            const px = cx + Math.cos(angle) * orbitR;
+            const py = cy + Math.sin(angle) * orbitR;
+            layout[root.id] = { x: px - 20, y: py - 20, w: 40, h: 40 };
+
+            const children = (root.children || []).map(id => byId[id]).filter(Boolean);
+            children.forEach((child, ci) => {
+                const childAngle = angle + (ci / Math.max(children.length, 1)) * Math.PI * 0.5;
+                const childR = 30;
+                const sx = px + Math.cos(childAngle) * childR;
+                const sy = py + Math.sin(childAngle) * childR;
+                const size = 24;
+                layout[child.id] = { x: sx - size/2, y: sy - size/2, w: size, h: size };
+
+                const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
+                grandchildren.forEach((gc, gi) => {
+                    const subAngle = childAngle + (gi / Math.max(grandchildren.length, 1)) * Math.PI * 0.3;
+                    const subR = 18;
+                    const gx = sx + Math.cos(subAngle) * subR;
+                    const gy = sy + Math.sin(subAngle) * subR;
+                    const ss = 14;
+                    layout[gc.id] = { x: gx - ss/2, y: gy - ss/2, w: ss, h: ss };
+                });
+            });
+        });
+        return layout;
+    },
+
+    render(ctx, entities, layout, W, H, COLORS) {
+        const gradient = ctx.createLinearGradient(0, 0, 0, H);
+        gradient.addColorStop(0, '#000011');
+        gradient.addColorStop(1, '#0a0a1a');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, W, H);
+
+        const now = performance.now() / 1000;
+        for (let i = 0; i < 100; i++) {
+            const x = (i * 137.5) % W;
+            const y = (i * 97.3) % H;
+            const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(now * 0.5 + i));
+            ctx.globalAlpha = twinkle;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(x, y, 1, 1);
+        }
+        ctx.globalAlpha = 1.0;
+
+        const cx = W / 2;
+        const cy = H / 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 25, 0, Math.PI * 2);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fill();
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = '#fbbf24';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        const roots = entities.filter(e => !e.parent);
+        roots.forEach((root, i) => {
+            const orbitR = 80 + i * 90;
+            ctx.beginPath();
+            ctx.arc(cx, cy, orbitR, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(96, 165, 250, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        });
+
+        entities.forEach(entity => {
+            const pos = layout[entity.id];
+            if (!pos) return;
+            const color = COLORS[entity.state] || COLORS.unknown;
+            const ecx = pos.x + pos.w / 2;
+            const ecy = pos.y + pos.h / 2;
+            const r = pos.w / 2;
+
+            ctx.beginPath();
+            ctx.arc(ecx, ecy, r, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = '#e5e7eb';
+            ctx.font = '9px monospace';
+            ctx.fillText((entity.name || '').slice(0, 10), pos.x, pos.y + pos.h + 12);
+        });
+    }
+};
+
 // ============================================================
 // Canvas sizing
 // ============================================================
