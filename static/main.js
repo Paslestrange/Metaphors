@@ -1083,6 +1083,12 @@ minimapCanvas.addEventListener('click', (e) => {
     const mainH = canvas.height / DPR;
     panX = -(worldX * zoom - mainW / 2);
     panY = -(worldY * zoom - mainH / 2);
+    
+    // Sync animation targets to new position
+    targetPanX = panX;
+    targetPanY = panY;
+    targetZoom = zoom;
+    
     render();
 });
 
@@ -1169,6 +1175,10 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', (e) => {
     if (isPanning) {
         isPanning = false;
+        // Sync animation targets to new position after drag
+        targetZoom = zoom;
+        targetPanX = panX;
+        targetPanY = panY;
         canvas.style.cursor = hoveredEntity ? 'pointer' : 'grab';
     }
 });
@@ -1203,9 +1213,14 @@ canvas.addEventListener('wheel', (e) => {
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
 
+    // Snap current values first so we compute from the live state, not stale targets
+    const baseZoom = zoom;
+    const basePanX = panX;
+    const basePanY = panY;
+
     // Calculate new pan to keep cursor position stable
-    const newPanX = cx - (cx - panX) * (newZoom / zoom);
-    const newPanY = cy - (cy - panY) * (newZoom / zoom);
+    const newPanX = cx - (cx - basePanX) * (newZoom / baseZoom);
+    const newPanY = cy - (cy - basePanY) * (newZoom / baseZoom);
 
     // Animate to new values
     targetZoom = newZoom;

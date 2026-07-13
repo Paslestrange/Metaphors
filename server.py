@@ -48,6 +48,7 @@ async def list_metaphors():
         "solar": "Systems as orbiting celestial bodies",
         "forest": "Services as a living forest ecosystem",
         "traffic_light": "Infrastructure as traffic signals at an intersection",
+        "space": "Systems as a space station with orbiting modules",
     }
     for name in names:
         metaphor_info.append({
@@ -56,8 +57,7 @@ async def list_metaphors():
             "description": descriptions.get(name, f"The {name} metaphor"),
         })
     # Also include client-side-only metaphors that have frontend renderers
-    # but aren't registered server-side (solar, forest)
-    known_client = ["solar", "forest"]
+    known_client = ["solar", "forest", "space"]
     for name in known_client:
         if name not in names:
             metaphor_info.append({
