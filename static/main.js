@@ -13,14 +13,27 @@ let mouseX = 0;
 let mouseY = 0;
 
 // --- Zoom / Pan state ---
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 5.0;
+const PAN_STEP = 40;
+const LERP_SPEED = 0.15; // smoothing factor for animated transitions
+
 let zoom = 1.0;
 let panX = 0;
 let panY = 0;
+let targetZoom = 1.0;
+let targetPanX = 0;
+let targetPanY = 0;
+let animatingView = false; // true when lerping toward targets
+
 let isPanning = false;
 let panStartX = 0;
 let panStartY = 0;
 let panOffsetX = 0;
 let panOffsetY = 0;
+let mouseDownX = 0;
+let mouseDownY = 0;
+let hasDragged = false;
 
 // --- Metaphor state ---
 let currentMetaphor = localStorage.getItem('metaphor') || 'city';

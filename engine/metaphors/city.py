@@ -633,6 +633,10 @@ class CityRenderer(MetaphorRenderer):
         except (AttributeError, TypeError):
             pass
 
+        # Ventilation grilles on sides (horizontal lines)
+        if bh > 40 and bw > 20:
+            self._draw_ventilation_grilles(ctx, pos)
+
         # Building outline with neon glow
         try:
             if state == "warning":
@@ -698,7 +702,16 @@ class CityRenderer(MetaphorRenderer):
     def _draw_windows(
         self, ctx: Any, entity: dict, pos: dict, state: str, now: float
     ) -> None:
-        """Draw window grid with individual lit/dark per window, state-based patterns."""
+        """Draw window grid with individual lit/dark per window, state-based patterns.
+
+        Spec-mandated lit percentages per state:
+          healthy:  70-90% lit warm yellow (#fbbf24), subtle flicker
+          running:  50-70% lit blue (#60a5fa), steady
+          warning:  30-50% lit orange (#f97316), pulsing
+          critical: 10-20% lit red (#ef4444), strobe
+          stopped:  0-5% lit (near dark), maybe one security light
+          idle:     20-30% lit dim grey (#94a3b8)
+        """
         bx, by, bw, bh = pos["x"], pos["y"], pos["w"], pos["h"]
 
         win_w = max(3, min(5, bw / 8))
@@ -706,7 +719,7 @@ class CityRenderer(MetaphorRenderer):
         gap_x = max(win_w + 2, bw / max(2, int(bw / 8)))
         gap_y = max(win_h + 3, bh / max(2, int(bh / 8)))
 
-        # Seed per-entity for consistent window pattern
+        # Stable per-entity seed so window pattern doesn't jump between frames
         entity_seed = hash(entity.get("id", "x")) % 10000
 
         wy = by + 5
@@ -715,67 +728,82 @@ class CityRenderer(MetaphorRenderer):
             wx = bx + 3
             col = 0
             while wx < bx + bw - 5:
-                # Deterministic per-window random based on position + entity
+                # Deterministic per-window hash (0-99)
                 win_hash = (entity_seed + row * 31 + col * 17) % 100
 
+                # --- State-based window rendering ---
                 if state == "stopped":
-                    # All dark, maybe one security light
-                    if win_hash < 5:
-                        ctx.fillStyle("#334455")
+                    # 0-5% lit — near dark, one possible security light
+                    if win_hash < 3:
+                        ctx.fillStyle("#334455")  # dim security light
+                    elif win_hash < 5:
+                        ctx.fillStyle("#111122")  # barely visible
                     else:
                         ctx.fillStyle(WINDOW_COLOR_OFF)
+
                 elif state == "healthy":
-                    # Warm yellow, some flickering off
-                    if win_hash < 15:
-                        ctx.fillStyle(WINDOW_COLOR_OFF)
-                    else:
+                    # 70-90% lit warm yellow, subtle flicker on random windows
+                    if win_hash < 80:
                         ctx.fillStyle(WINDOW_COLOR_HEALTHY)
-                        # Subtle flicker
-                        if win_hash < 20:
+                        # Subtle flicker on ~10% of lit windows (hash 70-80)
+                        if win_hash >= 70:
                             flicker = 0.6 + 0.4 * math.sin(now * 6 + win_hash)
                             try:
                                 ctx.globalAlpha(flicker)
                             except (AttributeError, TypeError):
                                 pass
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+
                 elif state == "running":
-                    # Blue-tinted windows, most lit
-                    if win_hash < 10:
-                        ctx.fillStyle(WINDOW_COLOR_OFF)
+                    # 50-70% lit blue (#60a5fa), steady
+                    if win_hash < 60:
+                        ctx.fillStyle(WINDOW_COLOR_RUNNING)
                     else:
-                        ctx.fillStyle("#88bbff")
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+
                 elif state == "warning":
-                    # Orange pulsing, some dark
-                    pulse = 0.5 + 0.5 * math.sin(now * 4 + row * 0.5)
-                    if win_hash < 25:
-                        ctx.fillStyle(WINDOW_COLOR_OFF)
-                    else:
+                    # 30-50% lit orange (#f97316), pulsing
+                    if win_hash < 40:
                         ctx.fillStyle(WINDOW_COLOR_WARNING)
+                        pulse = 0.5 + 0.5 * math.sin(now * 4 + row * 0.5)
                         try:
                             ctx.globalAlpha(0.5 + 0.5 * pulse)
                         except (AttributeError, TypeError):
                             pass
-                elif state == "critical":
-                    # Red strobe
-                    strobe = 0.5 + 0.5 * math.sin(now * 8 + col * 1.2)
-                    if win_hash < 30:
-                        ctx.fillStyle(WINDOW_COLOR_OFF)
                     else:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+
+                elif state == "critical":
+                    # 10-20% lit red (#ef4444), strobe
+                    if win_hash < 15:
                         ctx.fillStyle(WINDOW_COLOR_CRITICAL)
+                        strobe = 0.5 + 0.5 * math.sin(now * 8 + col * 1.2)
                         try:
                             ctx.globalAlpha(0.4 + 0.6 * strobe)
                         except (AttributeError, TypeError):
                             pass
-                else:
-                    # Unknown/idle — dim
-                    if win_hash < 60:
-                        ctx.fillStyle(WINDOW_COLOR_OFF)
                     else:
-                        ctx.fillStyle("#334455")
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
 
-                # Window frame (subtle border)
+                elif state == "idle":
+                    # 20-30% lit dim grey (#94a3b8)
+                    if win_hash < 25:
+                        ctx.fillStyle(WINDOW_COLOR_IDLE)
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+
+                else:
+                    # Unknown/other states — dim grey fallback
+                    if win_hash < 20:
+                        ctx.fillStyle("#334455")
+                    else:
+                        ctx.fillStyle(WINDOW_COLOR_OFF)
+
+                # Draw the window
                 ctx.fillRect(wx, wy, win_w, win_h)
 
-                # Reset alpha
+                # Reset alpha for next window
                 try:
                     ctx.globalAlpha(1.0)
                 except (AttributeError, TypeError):
@@ -1007,22 +1035,37 @@ class CityRenderer(MetaphorRenderer):
     def _draw_ground_reflections(
         self, ctx: Any, entities: list, layout: dict, w: int, h: int, now: float
     ) -> None:
-        """Wet road effect — mirrored building glow on road surface."""
+        """Wet road effect — mirrored building glow on road surface.
+
+        - Vertical gradient 20-40px tall mirroring building glow downward
+        - Neon sign colors reflected in wet road surface
+        - Semi-transparent overlay (alpha 0.15-0.25)
+        - Horizontal blur via multiple offset draws
+        - Only on ground level, not on buildings
+        """
         ground_y = h - 50
         road_y = ground_y + 5
         road_h = h - road_y
 
-        # Overall wet shimmer
+        # Base wet-road shimmer overlay (very subtle full-width sheen)
         shimmer = math.sin(now * 1.5)
         try:
-            ctx.globalAlpha(0.04 + 0.02 * shimmer)
+            ctx.globalAlpha(0.06 + 0.02 * shimmer)
             ctx.fillStyle("#4488ff")
             ctx.fillRect(0, road_y, w, road_h)
             ctx.globalAlpha(1.0)
         except (AttributeError, TypeError):
             pass
 
-        # Mirrored glow from each building
+        # Reflection params
+        REFLECTION_H_MIN = 20
+        REFLECTION_H_MAX = 40
+        BLUR_OFFSETS = (-3, -1.5, 0, 1.5, 3)  # horizontal blur offsets
+
+        # Collect neon sign positions from buildings for neon reflections
+        neon_reflections: list[tuple[float, float, str]] = []
+
+        # Mirrored glow from each building — vertical gradient
         for entity in entities:
             if entity.get("type", "") != "service":
                 continue
@@ -1031,33 +1074,65 @@ class CityRenderer(MetaphorRenderer):
                 continue
             state = entity.get("state", "unknown")
             color = STATE_COLORS.get(state, STATE_COLORS["unknown"])
+            neon_color = NEON_GLOW.get(state, NEON_GLOW["unknown"])
 
-            # Reflection directly below building
-            ref_x = pos["x"]
-            ref_w = pos["w"]
-            ref_y = road_y + 2
-            ref_h = min(road_h - 4, pos["h"] * 0.3)
+            bx, bw, bh = pos["x"], pos["w"], pos["h"]
 
-            try:
-                ctx.globalAlpha(0.05 + 0.02 * math.sin(now * 2 + pos["x"] * 0.01))
-                ctx.fillStyle(color)
-                ctx.fillRect(ref_x, ref_y, ref_w, ref_h)
-                ctx.globalAlpha(1.0)
-            except (AttributeError, TypeError):
-                pass
+            # Reflection height scales with building height, clamped 20-40px
+            ref_h = max(REFLECTION_H_MIN, min(REFLECTION_H_MAX, bh * 0.25))
+            ref_y_start = road_y + 2
 
-        # Neon reflections on wet road
+            # Draw vertical gradient: bright at top (near building base), fading down
+            gradient_steps = 6
+            for step in range(gradient_steps):
+                frac = step / gradient_steps
+                y = ref_y_start + frac * ref_h
+                band_h = ref_h / gradient_steps
+                alpha = (0.22 - frac * 0.18)  # 0.22 at top → 0.04 at bottom
+
+                # Horizontal blur: draw band multiple times with x-offset
+                for offset in BLUR_OFFSETS:
+                    try:
+                        ctx.globalAlpha(alpha * 0.25)  # split across 5 offsets
+                        ctx.fillStyle(neon_color)
+                        ctx.fillRect(bx + offset, y, bw, band_h + 1)
+                        ctx.globalAlpha(1.0)
+                    except (AttributeError, TypeError):
+                        pass
+
+            # Track neon sign color for secondary reflections
+            neon_reflections.append((bx + bw * 0.5, bw * 0.8, neon_color))
+
+        # Neon sign color reflections — elongated horizontal streaks on road
+        for nx, nw, nc in neon_reflections:
+            streak_w = nw * 1.5
+            streak_h = min(road_h - 4, 15)
+            streak_y = road_y + 8
+
+            for offset in BLUR_OFFSETS:
+                try:
+                    ctx.globalAlpha(0.18 * 0.25)  # blur split
+                    ctx.fillStyle(nc)
+                    ctx.fillRect(nx - streak_w / 2 + offset, streak_y, streak_w, streak_h)
+                    ctx.globalAlpha(1.0)
+                except (AttributeError, TypeError):
+                    pass
+
+        # Ambient neon reflections (pooled from sign palette) — wide soft glow
         reflection_colors = ["#ff00ff", "#00ffff", "#ffff00"]
         for i, rc in enumerate(reflection_colors):
             rx = (w / (len(reflection_colors) + 1)) * (i + 1)
-            rw = 40 + 20 * math.sin(now * 2 + i)
-            try:
-                ctx.globalAlpha(0.06 + 0.03 * math.sin(now * 3 + i * 1.5))
-                ctx.fillStyle(rc)
-                ctx.fillRect(rx - rw / 2, road_y + 5, rw, road_h - 10)
-                ctx.globalAlpha(1.0)
-            except (AttributeError, TypeError):
-                pass
+            rw = 50 + 25 * math.sin(now * 2 + i)
+            ref_h_amb = min(road_h - 4, 30)
+
+            for offset in BLUR_OFFSETS:
+                try:
+                    ctx.globalAlpha(0.20 * 0.25)
+                    ctx.fillStyle(rc)
+                    ctx.fillRect(rx - rw / 2 + offset, road_y + 5, rw, ref_h_amb)
+                    ctx.globalAlpha(1.0)
+                except (AttributeError, TypeError):
+                    pass
 
     # ------------------------------------------------------------------
     # District / Block drawing
