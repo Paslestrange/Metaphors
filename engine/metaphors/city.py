@@ -59,8 +59,10 @@ ROAD_COLOR = "#111128"
 MIN_BUILDING_W = 12
 MAX_BUILDING_W = 80
 WINDOW_COLOR_HEALTHY = "#fbbf24"
+WINDOW_COLOR_RUNNING = "#60a5fa"
 WINDOW_COLOR_WARNING = "#f97316"
-WINDOW_COLOR_CRITICAL = "#ff4444"
+WINDOW_COLOR_CRITICAL = "#ef4444"
+WINDOW_COLOR_IDLE = "#94a3b8"
 WINDOW_COLOR_OFF = "#1a1a2e"
 BUILDING_WALL = "#1a1a3e"
 
@@ -93,28 +95,48 @@ def _rgb_to_hex(r: int, g: int, b: int) -> str:
 
 
 class TrafficParticle:
-    """A single traffic particle moving along a road."""
+    """A single traffic particle moving along a road — headlight or taillight."""
 
-    def __init__(self, x: float, y: float, road_y: float, speed: float, color: str):
+    def __init__(self, x: float, y: float, road_y: float, speed: float, direction: str):
         self.x = x
         self.y = y
         self.road_y = road_y
         self.speed = speed
-        self.color = color
-        self.size = random.uniform(1.5, 3.5)
+        self.direction = direction  # 'right' or 'left'
+        self.size = random.uniform(2.0, 4.0)
+        
+        # Headlights (moving right): warm yellow/white
+        # Taillights (moving left): red
+        if direction == 'right':
+            self.color = random.choice(["#ffeb3b", "#fff9c4", "#ffffff", "#ffe082"])
+        else:
+            self.color = random.choice(["#ff0000", "#ff3333", "#cc0000", "#ff1a1a"])
+        self.glow_radius = self.size * 2.5
 
     def update(self, dt: float, canvas_w: int) -> None:
         self.x += self.speed * dt
-        if self.x > canvas_w + 10:
-            self.x = -10
-        elif self.x < -10:
-            self.x = canvas_w + 10
+        # Wrap around screen edges
+        if self.x > canvas_w + 20:
+            self.x = -20
+        elif self.x < -20:
+            self.x = canvas_w + 20
 
     def draw(self, ctx: Any) -> None:
         try:
+            # Subtle glow effect
+            ctx.globalAlpha(0.15)
             ctx.fillStyle(self.color)
-            ctx.globalAlpha(0.8)
-            ctx.fillRect(self.x, self.y, self.size, self.size * 0.5)
+            ctx.beginPath()
+            ctx.arc(self.x, self.y, self.glow_radius, 0, math.pi * 2)
+            ctx.fill()
+            
+            # Core light dot
+            ctx.globalAlpha(0.9)
+            ctx.fillStyle(self.color)
+            ctx.beginPath()
+            ctx.arc(self.x, self.y, self.size * 0.5, 0, math.pi * 2)
+            ctx.fill()
+            
             ctx.globalAlpha(1.0)
         except (AttributeError, TypeError):
             pass
@@ -848,41 +870,90 @@ class CityRenderer(MetaphorRenderer):
     def _draw_neon_sign(
         self, ctx: Any, entity: dict, pos: dict, color: str, glow: str, now: float
     ) -> None:
-        """Neon sign with building name, glow, and subtle flicker."""
+        """Neon sign with building name, glow, and subtle flicker.
+
+        Spec:
+        - Text rendered with glow effect (shadowBlur 8-15px)
+        - Color matches entity state (green=healthy, orange=warning, red=critical)
+        - Subtle flicker: random frames reduce opacity to 0.7 for 1-2 frames
+        - Font: monospace, 10-12px
+        - Positioned above building, not overlapping
+        - Background plate: dark rounded rectangle behind text for readability
+        """
         name = entity.get("name", "")[:12]
-        sign_w = min(pos["w"] + 6, len(name) * 7 + 8)
-        sign_h = 14
+        font_size = 11  # 10-12px range
+        char_w = 7  # approximate monospace char width at 11px
+        sign_w = min(pos["w"] + 6, len(name) * char_w + 10)
+        sign_h = 16
         sign_x = pos["x"] + (pos["w"] - sign_w) / 2
-        sign_y = pos["y"] - sign_h - 2
+        sign_y = pos["y"] - sign_h - 4  # positioned above, not overlapping
 
         if sign_y < 0:
             sign_y = pos["y"] + 2
 
-        # Sign background
-        ctx.fillStyle(NEON_SIGN_BG)
-        ctx.fillRect(sign_x, sign_y, sign_w, sign_h)
-
-        # Neon border with glow
+        # --- Background plate: dark rounded rectangle ---
+        radius = 3
         try:
-            ctx.shadowBlur(6)
+            ctx.fillStyle(NEON_SIGN_BG)
+            ctx.beginPath() if hasattr(ctx, "beginPath") else None
+            # Rounded rect via arcTo
+            ctx.moveTo(sign_x + radius, sign_y)
+            ctx.arcTo(sign_x + sign_w, sign_y, sign_x + sign_w, sign_y + sign_h, radius)
+            ctx.arcTo(sign_x + sign_w, sign_y + sign_h, sign_x, sign_y + sign_h, radius)
+            ctx.arcTo(sign_x, sign_y + sign_h, sign_x, sign_y, radius)
+            ctx.arcTo(sign_x, sign_y, sign_x + sign_w, sign_y, radius)
+            ctx.closePath() if hasattr(ctx, "closePath") else None
+            ctx.fill() if hasattr(ctx, "fill") else None
+        except (AttributeError, TypeError):
+            # Fallback to sharp rect if arcTo not available
+            ctx.fillStyle(NEON_SIGN_BG)
+            ctx.fillRect(sign_x, sign_y, sign_w, sign_h)
+
+        # --- Neon border with glow (shadowBlur 8-15px) ---
+        try:
+            ctx.shadowBlur(12)  # 8-15px range, centered at 12
             ctx.shadowColor(glow)
         except (AttributeError, TypeError):
             pass
 
         ctx.strokeStyle(color)
         ctx.lineWidth(1)
-        ctx.strokeRect(sign_x, sign_y, sign_w, sign_h)
-
-        # Text with subtle flicker
-        flicker = 0.85 + 0.15 * math.sin(now * 12 + hash(entity.get("id", "")) % 10)
         try:
-            ctx.globalAlpha(flicker)
+            ctx.beginPath() if hasattr(ctx, "beginPath") else None
+            ctx.moveTo(sign_x + radius, sign_y)
+            ctx.arcTo(sign_x + sign_w, sign_y, sign_x + sign_w, sign_y + sign_h, radius)
+            ctx.arcTo(sign_x + sign_w, sign_y + sign_h, sign_x, sign_y + sign_h, radius)
+            ctx.arcTo(sign_x, sign_y + sign_h, sign_x, sign_y, radius)
+            ctx.arcTo(sign_x, sign_y, sign_x + sign_w, sign_y, radius)
+            ctx.closePath() if hasattr(ctx, "closePath") else None
+            ctx.stroke() if hasattr(ctx, "stroke") else None
+        except (AttributeError, TypeError):
+            ctx.strokeRect(sign_x, sign_y, sign_w, sign_h)
+
+        # --- Text with discrete random flicker ---
+        # Flicker: ~15% of frames drop opacity to 0.7, deterministic per entity+time bucket
+        entity_hash = hash(entity.get("id", ""))
+        frame_bucket = int(now * 10)  # 100ms buckets for 1-2 frame duration
+        flicker_seed = (entity_hash + frame_bucket) % 100
+        if flicker_seed < 15:
+            alpha = 0.7  # dimmed frame
+        else:
+            alpha = 1.0  # normal frame
+        try:
+            ctx.globalAlpha(alpha)
+        except (AttributeError, TypeError):
+            pass
+
+        # Glow on text itself
+        try:
+            ctx.shadowBlur(10)
+            ctx.shadowColor(color)
         except (AttributeError, TypeError):
             pass
 
         ctx.fillStyle(color)
-        ctx.font("bold 9px 'Courier New', monospace")
-        ctx.fillText(name, sign_x + 4, sign_y + 10)
+        ctx.font(f"{font_size}px 'Courier New', monospace")
+        ctx.fillText(name, sign_x + 5, sign_y + 12)
 
         try:
             ctx.globalAlpha(1.0)
