@@ -633,45 +633,36 @@ class CityRenderer3D {
         const c2 = new THREE.Color(color2);
         return c1.lerp(c2, ratio).getHex();
     }
-        const colorStr = '#' + new THREE.Color(colorHex).getHexString();
-        ctx.strokeStyle = colorStr;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
 
-        // Glow pass — draw text with shadowBlur for neon bloom
-        ctx.shadowColor = colorStr;
-        ctx.shadowBlur = 14;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        ctx.fillStyle = colorStr;
-        ctx.fillText(text, padding, padding);
-        // Second pass for stronger glow
-        ctx.fillText(text, padding, padding);
-
-        // Crisp white text on top
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(text, padding, padding);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.needsUpdate = true;
-
-        const material = new THREE.SpriteMaterial({
-            map: texture,
+    addWindows(building, pos, color) {
+        const windowMat = new THREE.MeshBasicMaterial({
+            color: color,
             transparent: true,
-            depthTest: true,
-            depthWrite: false,
-            sizeAttenuation: true
+            opacity: 0.6
         });
+        const windowSize = 0.5;
+        const spacing = 2;
+        const numX = Math.floor(pos.w / spacing);
+        const numY = Math.floor(pos.h / spacing);
 
-        const sprite = new THREE.Sprite(material);
-        // Scale sprite proportionally to canvas aspect — base height ~2.5 world units
-        const aspect = canvas.width / canvas.height;
-        sprite.scale.set(aspect * 2.5, 2.5, 1);
-        return sprite;
+        for (let i = 0; i < numX; i++) {
+            for (let j = 0; j < numY; j++) {
+                if (Math.random() > 0.3) {
+                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                    // Front
+                    const w1 = new THREE.Mesh(windowGeo, windowMat);
+                    w1.position.set(-pos.w / 2 + spacing / 2 + i * spacing, -pos.h / 2 + spacing / 2 + j * spacing, pos.d / 2 + 0.01);
+                    building.add(w1);
+                    // Back
+                    const w2 = new THREE.Mesh(windowGeo, windowMat);
+                    w2.position.set(-pos.w / 2 + spacing / 2 + i * spacing, -pos.h / 2 + spacing / 2 + j * spacing, -pos.d / 2 - 0.01);
+                    w2.rotation.y = Math.PI;
+                    building.add(w2);
+                }
+            }
+        }
     }
+
     createWindowTexture(pos, state) {
         const cols = Math.max(2, Math.floor(pos.w * 1.5));
         const rows = Math.max(3, Math.floor(pos.h * 1.5));
@@ -720,66 +711,6 @@ class CityRenderer3D {
         texture.wrapT = THREE.RepeatWrapping;
         texture.magFilter = THREE.NearestFilter;
         return { texture, litColor, state };
-    }
-
-    createBuilding(entity, layout) {
-        const pos = layout[entity.id];
-        if (!pos) return null;
-
-        const state = entity.state || 'unknown';
-        const color = this.COLORS[state] || this.COLORS.unknown;
-        const windowData = this.createWindowTexture(pos, state);
-
-        const geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
-        const material = new THREE.MeshStandardMaterial({
-            color: this.WALL_COLOR,
-            roughness: 0.7,
-            metalness: 0.3,
-            emissiveMap: windowData.texture,
-            emissive: new THREE.Color(windowData.litColor),
-            emissiveIntensity: state === 'stopped' ? 0.05 : 0.6
-        });
-
-        const building = new THREE.Mesh(geometry, material);
-        building.position.set(pos.x, pos.h / 2, pos.z);
-        building.castShadow = true;
-        building.receiveShadow = true;
-        building.userData = { entity: entity, windowData: windowData };
-
-        this.scene.add(building);
-
-        // Neon edge outline in state color
-        this.addBuildingEdges(building, pos, color);
-
-        // Rooftop: HVAC + antenna on tall buildings
-        this.addRooftopDetails(building, pos);
-
-        // Entrance awning at base front
-        this.addEntrance(building, pos);
-
-        // Point light for healthy/running
-        if ((state === 'healthy' || state === 'running') && this.pointLights.length < 20) {
-            const light = new THREE.PointLight(color, 0.5, 15);
-            light.position.set(pos.x, pos.h * 0.7, pos.z);
-            this.scene.add(light);
-            this.pointLights.push({ light, entityId: entity.id });
-        }
-
-        return building;
-    }
-
-    addBuildingEdges(building, pos, color) {
-        const edgesGeo = new THREE.EdgesGeometry(
-            new THREE.BoxGeometry(pos.w, pos.h, pos.d)
-        );
-        const edgesMat = new THREE.LineBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.7
-        });
-        const edges = new THREE.LineSegments(edgesGeo, edgesMat);
-        building.add(edges);
-        building.userData.edgesMesh = edges;
     }
 
     addEntrance(building, pos) {
