@@ -397,112 +397,242 @@ class CityRenderer3D {
         });
     }
     
-    computeLayout(entities) {
+    computeLayout(entities, W, H) {
         const layout = {};
         const byId = {};
         entities.forEach(e => { byId[e.id] = e; });
         
         const roots = entities.filter(e => !e.parent);
-        const blockSize = 15;
-        const blockSpacing = 25;
-        const cols = Math.ceil(Math.sqrt(roots.length));
+        if (!roots.length) return layout;
         
-        roots.forEach((root, i) => {
-            const col = i % cols;
-            const row = Math.floor(i / cols);
-            const baseX = (col - cols / 2) * blockSpacing;
-            const baseZ = (row - cols / 2) * blockSpacing;
+        // District layout: arrange clusters side by side
+        const districtWidth = W / Math.max(roots.length, 1);
+        const groundY = H - 50;
+        
+        roots.forEach((root, di) => {
+            const dx = di * districtWidth;
+            const districtCenterX = dx + districtWidth / 2;
             
-            // Root building (cluster)
+            // Cluster = wireframe boundary on ground
             layout[root.id] = {
-                x: baseX,
-                z: baseZ,
-                w: 8,
-                h: 12,
-                d: 8
+                type: 'cluster',
+                x: dx + 10,
+                y: 0,
+                z: 50,
+                w: districtWidth - 20,
+                h: 1,
+                d: H - 100
             };
             
-            // Children (nodes/services)
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
-            children.forEach((child, ci) => {
-                const angle = (ci / Math.max(children.length, 1)) * Math.PI * 2;
-                const radius = 10;
-                const cx = baseX + Math.cos(angle) * radius;
-                const cz = baseZ + Math.sin(angle) * radius;
+            if (!children.length) return;
+            
+            // Block layout: arrange nodes within district
+            const blockWidth = (districtWidth - 40) / Math.max(children.length, 1);
+            const blockStartX = dx + 20;
+            
+            children.forEach((child, bi) => {
+                const bx = blockStartX + bi * blockWidth;
+                const blockCenterX = bx + blockWidth / 2;
                 
+                // Node = ground section with different shade
                 layout[child.id] = {
-                    x: cx,
-                    z: cz,
-                    w: 4,
-                    h: 6,
-                    d: 4
+                    type: 'node',
+                    x: bx + 5,
+                    y: 0,
+                    z: 60,
+                    w: blockWidth - 10,
+                    h: 0.5,
+                    d: H - 120
                 };
                 
-                // Grandchildren
                 const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
+                if (!grandchildren.length) return;
+                
+                // Service buildings within block
+                const servicesPerRow = Math.min(3, grandchildren.length);
+                const serviceWidth = (blockWidth - 20) / servicesPerRow;
+                
                 grandchildren.forEach((gc, gi) => {
-                    const subAngle = angle + ((gi / Math.max(grandchildren.length, 1)) * Math.PI * 0.5);
-                    const subRadius = 4;
-                    const gx = cx + Math.cos(subAngle) * subRadius;
-                    const gz = cz + Math.sin(subAngle) * subRadius;
+                    const metrics = gc.metrics || {};
+                    const cpu = Math.max(0, Math.min(100, metrics.cpu || 50));
+                    const mem = Math.max(0, Math.min(100, metrics.mem || 50));
+                    
+                    const bw = Math.max(8, Math.min(20, 8 + (mem / 100) * 12));
+                    const bh = Math.max(15, Math.min(60, 15 + (cpu / 100) * 45));
+                    
+                    const col = gi % servicesPerRow;
+                    const row = Math.floor(gi / servicesPerRow);
+                    const sx = bx + 10 + col * serviceWidth + (serviceWidth - bw) / 2;
+                    const sz = 80 + row * 40;
                     
                     layout[gc.id] = {
-                        x: gx,
-                        z: gz,
-                        w: 2,
-                        h: 3,
-                        d: 2
+                        type: 'service',
+                        x: sx,
+                        y: bh / 2,
+                        z: sz,
+                        w: bw,
+                        h: bh,
+                        d: bw
                     };
+                    
+                    // Container/process entities at building base
+                    const greatGrandchildren = (gc.children || []).map(id => byId[id]).filter(Boolean);
+                    greatGrandchildren.forEach((gg, ggi) => {
+                        const angle = (ggi / Math.max(greatGrandchildren.length, 1)) * Math.PI * 2;
+                        const radius = bw * 0.7;
+                        const gex = sx + bw / 2 + Math.cos(angle) * radius;
+                        const gez = sz + bw / 2 + Math.sin(angle) * radius;
+                        
+                        if (gg.type === 'process') {
+                            // Process = tiny dot on ground
+                            layout[gg.id] = {
+                                type: 'process',
+                                x: gex,
+                                y: 0.5,
+                                z: gez,
+                                w: 1.5,
+                                h: 1.5,
+                                d: 1.5
+                            };
+                        } else {
+                            // Container = small box at building base
+                            layout[gg.id] = {
+                                type: 'container',
+                                x: gex,
+                                y: 1,
+                                z: gez,
+                                w: 3,
+                                h: 2,
+                                d: 3
+                            };
+                        }
+                    });
                 });
             });
         });
         
         return layout;
     }
-
-    // ── Label sprites ──────────────────────────────────────────────
-    // Creates a Sprite with text on a dark rounded-rect background.
-    // Text is rendered in monospace bold at 28px internal resolution,
-    // with a neon glow (shadowBlur) in the entity's state color.
-    // Sprites always face the camera automatically in Three.js.
-    _createLabelSprite(text, colorHex) {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const fontSize = 28;
-        const padding = 14;
-
-        // Measure text
-        ctx.font = `bold ${fontSize}px monospace`;
-        const metrics = ctx.measureText(text);
-        const textWidth = metrics.width;
-
-        canvas.width = Math.ceil(textWidth + padding * 2);
-        canvas.height = Math.ceil(fontSize * 1.5 + padding * 2);
-
-        // Re-set font after canvas resize
-        ctx.font = `bold ${fontSize}px monospace`;
-        ctx.textBaseline = 'top';
-
-        const w = canvas.width;
-        const h = canvas.height;
-
-        // Dark rounded background
-        const r = 6;
-        ctx.beginPath();
-        ctx.moveTo(r, 0);
-        ctx.lineTo(w - r, 0);
-        ctx.quadraticCurveTo(w, 0, w, r);
-        ctx.lineTo(w, h - r);
-        ctx.quadraticCurveTo(w, h, w - r, h);
-        ctx.lineTo(r, h);
-        ctx.quadraticCurveTo(0, h, 0, h - r);
-        ctx.lineTo(0, r);
-        ctx.quadraticCurveTo(0, 0, r, 0);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(10, 10, 26, 0.80)';
-        ctx.fill();
-
-        // Border in state color
+    
+    createBuilding(entity, layout) {
+        const pos = layout[entity.id];
+        if (!pos) return null;
+        
+        const state = entity.state || 'unknown';
+        const color = this.COLORS[state] || this.COLORS.unknown;
+        const type = pos.type || entity.type || 'service';
+        
+        let geometry, material, mesh;
+        
+        if (type === 'cluster') {
+            // Cluster = wireframe boundary on ground
+            geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
+            const edges = new THREE.EdgesGeometry(geometry);
+            material = new THREE.LineBasicMaterial({
+                color: color,
+                linewidth: 2,
+                transparent: true,
+                opacity: 0.6
+            });
+            mesh = new THREE.LineSegments(edges, material);
+            mesh.position.set(pos.x + pos.w / 2, pos.y, pos.z + pos.d / 2);
+            mesh.userData = { entity: entity };
+            this.scene.add(mesh);
+            return mesh;
+            
+        } else if (type === 'node') {
+            // Node = ground section with different shade
+            geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
+            material = new THREE.MeshStandardMaterial({
+                color: this.mixColor(this.GROUND_COLOR, color, 0.3),
+                roughness: 0.9,
+                metalness: 0.1,
+                transparent: true,
+                opacity: 0.7
+            });
+            mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(pos.x + pos.w / 2, pos.y, pos.z + pos.d / 2);
+            mesh.receiveShadow = true;
+            mesh.userData = { entity: entity };
+            this.scene.add(mesh);
+            return mesh;
+            
+        } else if (type === 'service') {
+            // Service = building with windows
+            geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
+            material = new THREE.MeshStandardMaterial({
+                color: this.WALL_COLOR,
+                roughness: 0.7,
+                metalness: 0.3,
+                emissive: color,
+                emissiveIntensity: 0.2
+            });
+            mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(pos.x + pos.w / 2, pos.y, pos.z + pos.d / 2);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData = { entity: entity };
+            this.scene.add(mesh);
+            
+            // Add windows
+            this.addWindows(mesh, pos, color);
+            
+            // Rooftop details on 30% of buildings
+            if (Math.random() < 0.3 && pos.w > 10) {
+                this.addRooftopDetails(mesh, pos);
+            }
+            
+            // Point light for healthy/running
+            if ((state === 'healthy' || state === 'running') && this.pointLights.length < 20) {
+                const light = new THREE.PointLight(color, 0.5, 30);
+                light.position.set(pos.x + pos.w / 2, pos.y + pos.h * 0.7, pos.z + pos.d / 2);
+                this.scene.add(light);
+                this.pointLights.push({ light, entityId: entity.id });
+            }
+            
+            return mesh;
+            
+        } else if (type === 'container') {
+            // Container = small box at building base
+            geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
+            material = new THREE.MeshStandardMaterial({
+                color: this.mixColor(this.WALL_COLOR, color, 0.4),
+                roughness: 0.6,
+                metalness: 0.4,
+                emissive: color,
+                emissiveIntensity: 0.15
+            });
+            mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(pos.x, pos.y, pos.z);
+            mesh.castShadow = true;
+            mesh.userData = { entity: entity };
+            this.scene.add(mesh);
+            return mesh;
+            
+        } else if (type === 'process') {
+            // Process = tiny dot on ground
+            geometry = new THREE.SphereGeometry(pos.w / 2, 8, 8);
+            material = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.8
+            });
+            mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(pos.x, pos.y, pos.z);
+            mesh.userData = { entity: entity };
+            this.scene.add(mesh);
+            return mesh;
+        }
+        
+        return null;
+    }
+    
+    mixColor(color1, color2, ratio) {
+        const c1 = new THREE.Color(color1);
+        const c2 = new THREE.Color(color2);
+        return c1.lerp(c2, ratio).getHex();
+    }
         const colorStr = '#' + new THREE.Color(colorHex).getHexString();
         ctx.strokeStyle = colorStr;
         ctx.lineWidth = 1.5;
