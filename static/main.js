@@ -1594,6 +1594,1058 @@ metaphorRenderers.space = {
     }
 };
 
+// City3D metaphor — 3D Three.js renderer
+metaphorRenderers.city3d = {
+    _initialized: false,
+    _canvas3d: null,
+    
+    computeLayout(entities, W, H) {
+        // 3D renderer computes its own layout internally
+        return {};
+    },
+
+    render(ctx, entities, layout, W, H, COLORS) {
+        // Initialize 3D renderer on first call
+        if (!this._initialized) {
+            const canvas3d = document.getElementById('canvas3d');
+            if (canvas3d && window.City3D) {
+                this._canvas3d = canvas3d;
+                // Size the 3D canvas to match 2D canvas
+                canvas3d.width = canvas.width;
+                canvas3d.height = canvas.height;
+                canvas3d.style.width = canvas.style.width;
+                canvas3d.style.height = canvas.style.height;
+                window.City3D.init(canvas3d);
+                this._initialized = true;
+            }
+        }
+
+        // Update 3D scene with new entity data
+        if (this._initialized && window.City3D) {
+            window.City3D.update(entities);
+        }
+    }
+};
+
+// ============================================================
+// Garden Metaphor — 3D-style garden with plants, terrain, lighting
+// Mapping: Cluster=Garden Bed, Node=Planting Row, Service=Plant/Tree, Container=Branch
+// ============================================================
+const _gardenState = {
+    initialized: false,
+    lastW: 0,
+    lastH: 0,
+    startTime: performance.now() / 1000,
+    stars: [],
+    fireflies: [],
+    butterflies: [],
+    grassBlades: [],
+    waterRipples: [],
+    clouds: [],
+    pebbles: [],
+    flowers: [],
+};
+
+const GARDEN_COLORS = {
+    healthy: '#4ade80', running: '#22c55e', warning: '#fbbf24',
+    degraded: '#92400e', critical: '#8b4513', stopped: '#6b7280',
+    idle: '#86efac', pending: '#a3e635', scaling: '#34d399', unknown: '#6b7280',
+};
+
+const GARDEN_SKY_DAY_TOP = '#87ceeb';
+const GARDEN_SKY_DAY_BOTTOM = '#b0e0e6';
+const GARDEN_SKY_NIGHT_TOP = '#1a0a2e';
+const GARDEN_SKY_NIGHT_BOTTOM = '#2d1b4e';
+const GARDEN_SOIL_DARK = '#3d2817';
+const GARDEN_SOIL_MID = '#5c3d2e';
+const GARDEN_SOIL_LIGHT = '#6b4c3b';
+const GARDEN_GRASS = '#228b22';
+const GARDEN_GRASS_LIGHT = '#32cd32';
+const GARDEN_FENCE_POST = '#8B6914';
+const GARDEN_FENCE_RAIL = '#A0824A';
+const GARDEN_WATER = '#4488ff';
+const GARDEN_FIREFLY = '#ffd700';
+const GARDEN_PATH = '#c4a882';
+const GARDEN_FLOWER_COLORS = ['#ff69b4', '#f472b6', '#fb923c', '#a78bfa', '#f87171', '#38bdf8', '#facc15'];
+const GARDEN_BUTTERFLY_COLORS = ['#c084fc', '#fb7185', '#38bdf8', '#fbbf24', '#f472b6'];
+
+function _gardenHash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+    return Math.abs(h);
+}
+
+function _gardenLerpColor(c1, c2, t) {
+    t = Math.max(0, Math.min(1, t));
+    const r1 = parseInt(c1.slice(1,3), 16), g1 = parseInt(c1.slice(3,5), 16), b1 = parseInt(c1.slice(5,7), 16);
+    const r2 = parseInt(c2.slice(1,3), 16), g2 = parseInt(c2.slice(3,5), 16), b2 = parseInt(c2.slice(5,7), 16);
+    const r = Math.round(r1 + (r2 - r1) * t);
+    const g = Math.round(g1 + (g2 - g1) * t);
+    const b = Math.round(b1 + (b2 - b1) * t);
+    return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
+function _gardenGetTimeOfDay() {
+    return (Date.now() / 1000 % 86400) / 86400.0;
+}
+
+function _gardenIsNight(tod) {
+    return tod < 0.25 || tod > 0.833;
+}
+
+function _gardenSkyColors(tod) {
+    if (tod < 0.25) return [GARDEN_SKY_NIGHT_TOP, GARDEN_SKY_NIGHT_BOTTOM];
+    if (tod < 0.33) {
+        const t = (tod - 0.25) / 0.08;
+        return [_gardenLerpColor(GARDEN_SKY_NIGHT_TOP, '#ff7e5f', t), _gardenLerpColor(GARDEN_SKY_NIGHT_BOTTOM, '#feb47b', t)];
+    }
+    if (tod < 0.42) {
+        const t = (tod - 0.33) / 0.09;
+        return [_gardenLerpColor('#ff7e5f', GARDEN_SKY_DAY_TOP, t), _gardenLerpColor('#feb47b', GARDEN_SKY_DAY_BOTTOM, t)];
+    }
+    if (tod < 0.75) return [GARDEN_SKY_DAY_TOP, GARDEN_SKY_DAY_BOTTOM];
+    if (tod < 0.833) {
+        const t = (tod - 0.75) / 0.083;
+        return [_gardenLerpColor(GARDEN_SKY_DAY_TOP, '#ff7e5f', t), _gardenLerpColor(GARDEN_SKY_DAY_BOTTOM, '#feb47b', t)];
+    }
+    const t = (tod - 0.833) / 0.167;
+    return [_gardenLerpColor('#ff7e5f', GARDEN_SKY_NIGHT_TOP, t), _gardenLerpColor('#feb47b', GARDEN_SKY_NIGHT_BOTTOM, t)];
+}
+
+function _gardenSunPos(tod, W, H) {
+    if (tod < 0.25 || tod > 0.833) return { x: -100, y: -100, r: 0 };
+    const t = (tod - 0.25) / 0.583;
+    const angle = Math.PI * t;
+    const skyH = H * 0.35;
+    const x = W * 0.1 + (W * 0.8) * t;
+    const y = skyH - Math.sin(angle) * (skyH * 0.7) + skyH * 0.3;
+    const r = 20 + 10 * Math.sin(angle);
+    return { x, y, r };
+}
+
+function _gardenInitScene(W, H) {
+    const rng = (seed) => { let s = seed; return () => { s = (s * 16807 + 0) % 2147483647; return s / 2147483647; }; };
+
+    // Stars
+    const r1 = rng(77777);
+    _gardenState.stars = [];
+    for (let i = 0; i < 50; i++) {
+        _gardenState.stars.push({
+            x: r1() * W, y: r1() * H * 0.3,
+            size: 0.5 + r1() * 1.5, brightness: 0.3 + r1() * 0.7,
+            twinkle: 0.5 + r1() * 2.5, phase: r1() * Math.PI * 2,
+        });
+    }
+
+    // Fireflies
+    const r2 = rng(88888);
+    _gardenState.fireflies = [];
+    for (let i = 0; i < 25; i++) {
+        _gardenState.fireflies.push({
+            x: r2() * W, y: H * 0.3 + r2() * H * 0.5,
+            vx: (r2() - 0.5) * 12, vy: (r2() - 0.5) * 8,
+            phase: r2() * Math.PI * 2, brightness: 0.4 + r2() * 0.6,
+        });
+    }
+
+    // Butterflies
+    const r3 = rng(99999);
+    _gardenState.butterflies = [];
+    for (let i = 0; i < 8; i++) {
+        _gardenState.butterflies.push({
+            x: r3() * W, y: H * 0.35 + r3() * H * 0.4,
+            targetX: r3() * W, targetY: H * 0.35 + r3() * H * 0.4,
+            color: GARDEN_BUTTERFLY_COLORS[Math.floor(r3() * GARDEN_BUTTERFLY_COLORS.length)],
+            wingPhase: r3() * Math.PI * 2, speed: 0.3 + r3() * 0.5,
+            moveTimer: r3() * 5,
+        });
+    }
+
+    // Grass blades (foreground)
+    const r4 = rng(11112);
+    _gardenState.grassBlades = [];
+    const groundY = H * 0.88;
+    for (let i = 0; i < 120; i++) {
+        _gardenState.grassBlades.push({
+            x: r4() * W, y: groundY + r4() * (H - groundY) * 0.3,
+            height: 5 + r4() * 12, phase: r4() * Math.PI * 2,
+            shade: r4(),
+        });
+    }
+
+    // Water ripples
+    const r5 = rng(22223);
+    _gardenState.waterRipples = [];
+    for (let i = 0; i < 12; i++) {
+        _gardenState.waterRipples.push({
+            offset: r5(), speed: 0.03 + r5() * 0.05,
+            amplitude: 1 + r5() * 2,
+        });
+    }
+
+    // Clouds
+    const r6 = rng(33334);
+    _gardenState.clouds = [];
+    for (let i = 0; i < 4; i++) {
+        _gardenState.clouds.push({
+            x: r6() * W, y: H * 0.05 + r6() * H * 0.15,
+            w: 60 + r6() * 80, h: 15 + r6() * 15,
+            speed: 2 + r6() * 4, alpha: 0.15 + r6() * 0.2,
+        });
+    }
+
+    // Pebbles
+    const r7 = rng(44445);
+    _gardenState.pebbles = [];
+    for (let i = 0; i < 40; i++) {
+        _gardenState.pebbles.push({
+            x: r7() * W, y: groundY + 5 + r7() * (H - groundY - 10),
+            r: 1 + r7() * 2.5, shade: 0.3 + r7() * 0.4,
+        });
+    }
+
+    // Scattered flowers (decorative)
+    const r8 = rng(55556);
+    _gardenState.flowers = [];
+    for (let i = 0; i < 15; i++) {
+        _gardenState.flowers.push({
+            x: r8() * W, y: groundY - 2 + r8() * 8,
+            color: GARDEN_FLOWER_COLORS[Math.floor(r8() * GARDEN_FLOWER_COLORS.length)],
+            size: 2 + r8() * 3, phase: r8() * Math.PI * 2,
+        });
+    }
+
+    _gardenState.initialized = true;
+    _gardenState.lastW = W;
+    _gardenState.lastH = H;
+}
+
+function _gardenDrawSky(ctx, W, H, now, tod) {
+    const [skyTop, skyBottom] = _gardenSkyColors(tod);
+    const skyH = H * 0.35;
+    const grad = ctx.createLinearGradient(0, 0, 0, skyH);
+    grad.addColorStop(0, skyTop);
+    grad.addColorStop(1, skyBottom);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, skyH);
+
+    // Fill below sky with a transition color until ground
+    ctx.fillStyle = skyBottom;
+    ctx.fillRect(0, skyH, W, H * 0.05);
+
+    // Stars at night
+    if (_gardenIsNight(tod)) {
+        _gardenState.stars.forEach(s => {
+            const alpha = s.brightness * (0.5 + 0.5 * Math.sin(now * s.twinkle + s.phase));
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1.0;
+    }
+
+    // Clouds (daytime only)
+    if (!_gardenIsNight(tod)) {
+        _gardenState.clouds.forEach(cloud => {
+            cloud.x += cloud.speed * 0.016;
+            if (cloud.x > W + cloud.w) cloud.x = -cloud.w;
+            ctx.globalAlpha = cloud.alpha;
+            ctx.fillStyle = '#ffffff';
+            // Fluffy cloud shape
+            ctx.beginPath();
+            ctx.ellipse(cloud.x, cloud.y, cloud.w * 0.4, cloud.h * 0.6, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(cloud.x - cloud.w * 0.25, cloud.y + 3, cloud.w * 0.3, cloud.h * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(cloud.x + cloud.w * 0.25, cloud.y + 2, cloud.w * 0.35, cloud.h * 0.55, 0, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+function _gardenDrawSun(ctx, W, H, tod, entities) {
+    const sun = _gardenSunPos(tod, W, H);
+    if (sun.r <= 0) return;
+
+    // Sun color based on cluster health
+    const roots = entities.filter(e => !e.parent && e.type === 'cluster');
+    let sunColor = '#ffd700';
+    if (roots.length > 0) {
+        const worst = roots.reduce((a, b) => {
+            const pri = { healthy: 0, running: 0, idle: 1, warning: 2, degraded: 3, critical: 4, stopped: 5, unknown: 3 };
+            return (pri[b.state] || 3) > (pri[a.state] || 3) ? b : a;
+        });
+        const stateSunColors = { healthy: '#ffd700', running: '#f59e0b', idle: '#fde68a', warning: '#f97316', degraded: '#ef4444', critical: '#991b1b', stopped: '#374151' };
+        sunColor = stateSunColors[worst.state] || '#ffd700';
+    }
+
+    // Outer glow
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = sunColor;
+    ctx.beginPath();
+    ctx.arc(sun.x, sun.y, sun.r + 25, 0, Math.PI * 2);
+    ctx.fill();
+    // Mid glow
+    ctx.globalAlpha = 0.3;
+    ctx.beginPath();
+    ctx.arc(sun.x, sun.y, sun.r + 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Sun body
+    const sunGrad = ctx.createRadialGradient(sun.x, sun.y, 0, sun.x, sun.y, sun.r);
+    sunGrad.addColorStop(0, '#fffde0');
+    sunGrad.addColorStop(0.6, sunColor);
+    sunGrad.addColorStop(1, sunColor);
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(sun.x, sun.y, sun.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sun rays
+    ctx.save();
+    ctx.strokeStyle = sunColor;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.4;
+    for (let i = 0; i < 12; i++) {
+        const angle = (Math.PI * 2 / 12) * i + Date.now() * 0.0001;
+        const inner = sun.r + 4;
+        const outer = sun.r + 14 + 4 * Math.sin(Date.now() * 0.003 + i);
+        ctx.beginPath();
+        ctx.moveTo(sun.x + Math.cos(angle) * inner, sun.y + Math.sin(angle) * inner);
+        ctx.lineTo(sun.x + Math.cos(angle) * outer, sun.y + Math.sin(angle) * outer);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function _gardenDrawTerrain(ctx, W, H, now) {
+    const groundY = H * 0.35;
+
+    // Base grass gradient
+    const grassGrad = ctx.createLinearGradient(0, groundY, 0, H);
+    grassGrad.addColorStop(0, '#4a8c3f');
+    grassGrad.addColorStop(0.05, '#3d7a32');
+    grassGrad.addColorStop(0.15, '#2d5a1e');
+    grassGrad.addColorStop(0.4, GARDEN_SOIL_DARK);
+    grassGrad.addColorStop(1, '#2a1a0f');
+    ctx.fillStyle = grassGrad;
+    ctx.fillRect(0, groundY, W, H - groundY);
+
+    // Noise displacement — rolling hills effect
+    ctx.fillStyle = '#3d7a32';
+    for (let x = 0; x < W; x += 4) {
+        const hillH = 3 + Math.sin(x * 0.02) * 4 + Math.sin(x * 0.007) * 6;
+        ctx.fillRect(x, groundY - hillH, 4, hillH);
+    }
+
+    // Grass texture top layer
+    ctx.fillStyle = GARDEN_GRASS;
+    for (let x = 0; x < W; x += 3) {
+        const gh = 3 + Math.sin(x * 0.05) * 2 + Math.sin(x * 0.13) * 1.5;
+        ctx.fillRect(x, groundY - gh, 2, gh);
+        ctx.fillStyle = GARDEN_GRASS_LIGHT;
+        ctx.fillRect(x + 1, groundY - gh + 1, 1, gh - 1);
+        ctx.fillStyle = GARDEN_GRASS;
+    }
+
+    // Soil texture
+    ctx.fillStyle = GARDEN_SOIL_MID;
+    for (let x = 0; x < W; x += 12) {
+        const py = groundY + (H - groundY) * 0.3 + Math.sin(x * 0.03) * 10;
+        ctx.fillRect(x, py, 8, 2);
+    }
+
+    // Pebbles
+    _gardenState.pebbles.forEach(p => {
+        ctx.fillStyle = `rgba(${Math.round(140 * p.shade)},${Math.round(120 * p.shade)},${Math.round(100 * p.shade)},0.6)`;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.r, p.r * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function _gardenDrawPathways(ctx, entities, layout, W, H) {
+    const roots = entities.filter(e => !e.parent && e.type === 'cluster');
+    if (roots.length < 2) return;
+
+    const gardenTop = H * 0.35;
+    const gardenBottom = H * 0.88;
+
+    for (let i = 0; i < roots.length - 1; i++) {
+        const posA = layout[roots[i].id];
+        const posB = layout[roots[i + 1].id];
+        if (!posA || !posB) continue;
+
+        const pathLeft = posA.x + posA.w;
+        const pathRight = posB.x;
+        const pathW = pathRight - pathLeft;
+        if (pathW <= 0) continue;
+
+        // Path fill
+        ctx.fillStyle = GARDEN_PATH;
+        ctx.fillRect(pathLeft, gardenTop, pathW, gardenBottom - gardenTop);
+
+        // Path edges
+        ctx.strokeStyle = '#a08060';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pathLeft + 1, gardenTop);
+        ctx.lineTo(pathLeft + 1, gardenBottom);
+        ctx.moveTo(pathRight - 1, gardenTop);
+        ctx.lineTo(pathRight - 1, gardenBottom);
+        ctx.stroke();
+
+        // Footprint texture
+        ctx.fillStyle = '#b09870';
+        for (let j = gardenTop; j < gardenBottom; j += 18) {
+            const fx = pathLeft + pathW * 0.3 + ((j * 7) % (pathW * 0.4));
+            ctx.beginPath();
+            ctx.arc(fx, j, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+function _gardenDrawBed(ctx, entity, pos, now) {
+    const x = pos.x, y = pos.y, w = pos.w, h = pos.h;
+
+    // Rich soil
+    const soilGrad = ctx.createLinearGradient(x, y, x, y + h);
+    soilGrad.addColorStop(0, '#5c3d2e');
+    soilGrad.addColorStop(0.5, GARDEN_SOIL_DARK);
+    soilGrad.addColorStop(1, '#2a1a0f');
+    ctx.fillStyle = soilGrad;
+    ctx.fillRect(x, y, w, h);
+
+    // Soil strata lines
+    ctx.fillStyle = GARDEN_SOIL_MID;
+    for (let i = 0; i < h; i += 8) {
+        ctx.fillRect(x + 2, y + i, w - 4, 2);
+    }
+
+    // Soil detail spots
+    ctx.fillStyle = GARDEN_SOIL_LIGHT;
+    const seed = _gardenHash(entity.id || 'bed');
+    let s = seed;
+    const nextR = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    for (let i = 0; i < w; i += 10) {
+        for (let j = 0; j < h; j += 12) {
+            const dx = nextR() * (w - 8);
+            const dy = nextR() * (h - 8);
+            ctx.fillRect(x + 4 + dx, y + 4 + dy, 3, 2);
+        }
+    }
+
+    // Wooden fence
+    _gardenDrawFence(ctx, x, y, w, h);
+
+    // Label sign
+    const name = (entity.name || '').slice(0, 14);
+    const signW = Math.min(name.length * 7 + 12, w - 10);
+    ctx.fillStyle = '#a0824a';
+    ctx.fillRect(x + 6, y + 4, signW, 16);
+    ctx.strokeStyle = '#6b5030';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 6, y + 4, signW, 16);
+    ctx.fillStyle = '#3f2010';
+    ctx.font = "bold 10px Georgia, serif";
+    ctx.fillText(name, x + 12, y + 16);
+}
+
+function _gardenDrawFence(ctx, x, y, w, h) {
+    const postW = 4, postH = 10;
+
+    // Posts
+    const positions = [x, x + w / 2 - postW / 2, x + w - postW];
+    positions.forEach(px => {
+        ctx.fillStyle = GARDEN_FENCE_POST;
+        ctx.fillRect(px, y - postH + 2, postW, postH + 4);
+        ctx.fillStyle = GARDEN_FENCE_RAIL;
+        ctx.fillRect(px - 1, y - postH, postW + 2, 3);
+    });
+
+    // Rails
+    ctx.fillStyle = GARDEN_FENCE_RAIL;
+    ctx.fillRect(x, y - 2, w, 2);
+    ctx.fillRect(x, y + 4, w, 2);
+
+    // Bottom fence
+    const botY = y + h;
+    positions.forEach(px => {
+        ctx.fillStyle = GARDEN_FENCE_POST;
+        ctx.fillRect(px, botY - 2, postW, postH);
+        ctx.fillStyle = GARDEN_FENCE_RAIL;
+        ctx.fillRect(px - 1, botY + postH - 4, postW + 2, 3);
+    });
+    ctx.fillStyle = GARDEN_FENCE_RAIL;
+    ctx.fillRect(x, botY, w, 2);
+    ctx.fillRect(x, botY + 5, w, 2);
+}
+
+function _gardenDrawPlant(ctx, entity, pos, now) {
+    const state = entity.state || 'unknown';
+    const cpu = (entity.metrics || {}).cpu || 30;
+    const leafColor = GARDEN_COLORS[state] || GARDEN_COLORS.unknown;
+    const x = pos.x + pos.w / 2;
+    const bottom = pos.y + pos.h;
+    const h = pos.h;
+    const w = pos.w;
+    const seed = _gardenHash(entity.id || '');
+
+    // Determine plant type by hash
+    const plantType = ['tree', 'flower', 'bush'][seed % 3];
+
+    if (plantType === 'tree') {
+        _gardenDrawTree(ctx, x, bottom, w, h, leafColor, state, cpu, seed, now);
+    } else if (plantType === 'flower') {
+        _gardenDrawFlower(ctx, x, bottom, w, h, leafColor, state, entity, seed, now);
+    } else {
+        _gardenDrawBush(ctx, x, bottom, w, h, leafColor, state, cpu, seed, now);
+    }
+
+    // Dew drops for idle
+    if (state === 'idle') {
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        const drops = [[x - 4, pos.y + h * 0.3, 2.5], [x + 5, pos.y + h * 0.5, 2], [x - 2, pos.y + h * 0.7, 1.8]];
+        drops.forEach(([dx, dy, dr]) => {
+            ctx.fillStyle = '#bae6fd';
+            ctx.beginPath(); ctx.arc(dx, dy, dr, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 0.8;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(dx - dr * 0.3, dy - dr * 0.3, dr * 0.3, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 0.6;
+        });
+        ctx.restore();
+    }
+
+    // Weeds for critical/degraded
+    if (state === 'critical' || state === 'degraded') {
+        ctx.strokeStyle = '#4b5563';
+        ctx.lineWidth = 1.5;
+        const wx = pos.x + pos.w + 4;
+        const wy = bottom;
+        for (let j = 0; j < 3; j++) {
+            const ox = j * 3;
+            ctx.beginPath();
+            ctx.moveTo(wx + ox, wy);
+            ctx.lineTo(wx + ox + 2, wy - 8 - j * 3);
+            ctx.lineTo(wx + ox - 1, wy - 12 - j * 2);
+            ctx.lineTo(wx + ox + 3, wy - 18 - j * 2);
+            ctx.stroke();
+        }
+        ctx.fillStyle = '#6b7280';
+        ctx.beginPath();
+        ctx.arc(wx + 2, wy - 14, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Label
+    ctx.fillStyle = '#1a3a1a';
+    ctx.font = "8px Georgia, serif";
+    ctx.fillText((entity.name || '').slice(0, 12), pos.x, pos.y + pos.h + 10);
+}
+
+function _gardenDrawTree(ctx, x, bottom, w, h, leafColor, state, cpu, seed, now) {
+    const trunkW = Math.max(3, w * 0.15);
+    const trunkH = h * 0.45;
+    const canopyR = Math.max(6, w * 0.4);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath();
+    ctx.ellipse(x + 8, bottom + 3, canopyR * 1.2, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Trunk
+    const trunkGrad = ctx.createLinearGradient(x - trunkW / 2, bottom - trunkH, x + trunkW / 2, bottom - trunkH);
+    trunkGrad.addColorStop(0, '#4a2e1f');
+    trunkGrad.addColorStop(0.5, '#5c3d2e');
+    trunkGrad.addColorStop(1, '#4a2e1f');
+    ctx.fillStyle = trunkGrad;
+    ctx.fillRect(x - trunkW / 2, bottom - trunkH, trunkW, trunkH);
+
+    // Bark texture
+    ctx.strokeStyle = '#3d2010';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 4; i++) {
+        const ty = bottom - trunkH + 4 + i * (trunkH / 4);
+        ctx.beginPath();
+        ctx.moveTo(x - trunkW / 2 + 1, ty);
+        ctx.lineTo(x + trunkW / 2 - 1, ty + 2);
+        ctx.stroke();
+    }
+
+    // Canopy — layered circles for 3D feel
+    const canopyY = bottom - trunkH - canopyR * 0.3;
+    const sway = Math.sin(now * 0.8 + seed * 0.01) * 1.5;
+
+    // Back canopy (darker — depth)
+    const darkLeaf = _gardenLerpColor(leafColor, '#000000', 0.25);
+    ctx.fillStyle = darkLeaf;
+    ctx.beginPath();
+    ctx.arc(x - canopyR * 0.3 + sway, canopyY + 2, canopyR * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + canopyR * 0.3 + sway, canopyY + 3, canopyR * 0.65, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Front canopy (main)
+    ctx.fillStyle = leafColor;
+    ctx.beginPath();
+    ctx.arc(x + sway, canopyY - 2, canopyR * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Canopy highlight (sun-facing)
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(x - canopyR * 0.2 + sway, canopyY - canopyR * 0.3, canopyR * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Flowers on tree for active states
+    if (state === 'healthy' || state === 'running' || state === 'scaling') {
+        const flowerC = GARDEN_FLOWER_COLORS[seed % GARDEN_FLOWER_COLORS.length];
+        for (let i = 0; i < 4; i++) {
+            const angle = (Math.PI * 2 / 4) * i + 0.5;
+            const fx = x + Math.cos(angle) * canopyR * 0.5 + sway;
+            const fy = canopyY + Math.sin(angle) * canopyR * 0.4;
+            ctx.fillStyle = flowerC;
+            ctx.beginPath();
+            ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            // Petal highlight
+            ctx.fillStyle = '#ffffff';
+            ctx.globalAlpha = 0.3;
+            ctx.beginPath();
+            ctx.arc(fx - 0.5, fy - 0.5, 1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+        }
+    }
+}
+
+function _gardenDrawFlower(ctx, x, bottom, w, h, leafColor, state, entity, seed, now) {
+    const stemH = h * 0.7;
+    const petalR = Math.max(4, w * 0.25);
+    const sway = Math.sin(now * 1.5 + seed * 0.01) * 2;
+
+    // Stem
+    ctx.strokeStyle = '#166534';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, bottom);
+    ctx.quadraticCurveTo(x + sway * 0.5, bottom - stemH * 0.5, x + sway, bottom - stemH);
+    ctx.stroke();
+
+    // Leaves on stem
+    ctx.fillStyle = leafColor;
+    ctx.beginPath();
+    ctx.ellipse(x - 4 + sway * 0.3, bottom - stemH * 0.4, 4, 2.5, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 5 + sway * 0.3, bottom - stemH * 0.6, 3.5, 2, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Flower head
+    const flowerTop = bottom - stemH;
+    if (state === 'healthy' || state === 'running' || state === 'scaling') {
+        const flowerC = GARDEN_FLOWER_COLORS[seed % GARDEN_FLOWER_COLORS.length];
+        const nPetals = 6;
+        for (let i = 0; i < nPetals; i++) {
+            const angle = (Math.PI * 2 / nPetals) * i + now * 0.1;
+            const px = x + sway + Math.cos(angle) * petalR * 0.6;
+            const py = flowerTop + Math.sin(angle) * petalR * 0.6;
+            ctx.fillStyle = flowerC;
+            ctx.beginPath();
+            ctx.arc(px, py, petalR * 0.45, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        // Center
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(x + sway, flowerTop, petalR * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        // Center highlight
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.arc(x + sway - 1, flowerTop - 1, petalR * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+    } else {
+        // Closed/wilting
+        ctx.fillStyle = leafColor;
+        ctx.beginPath();
+        ctx.arc(x + sway, flowerTop, petalR * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function _gardenDrawBush(ctx, x, bottom, w, h, leafColor, state, cpu, seed, now) {
+    const bushW = Math.max(8, w * 0.7);
+    const bushH = Math.max(6, h * 0.5);
+    const bushY = bottom - bushH;
+    const sway = Math.sin(now * 0.6 + seed * 0.01) * 1;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.beginPath();
+    ctx.ellipse(x, bottom + 2, bushW * 0.6, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bush body — overlapping circles for 3D
+    const dark = _gardenLerpColor(leafColor, '#000000', 0.2);
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.arc(x - bushW * 0.25 + sway, bushY + bushH * 0.3, bushW * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + bushW * 0.25 + sway, bushY + bushH * 0.3, bushW * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main body
+    ctx.fillStyle = leafColor;
+    ctx.beginPath();
+    ctx.arc(x + sway, bushY + bushH * 0.2, bushW * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Top
+    ctx.beginPath();
+    ctx.arc(x + sway, bushY, bushW * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Highlight
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(x - bushW * 0.1 + sway, bushY - bushW * 0.1, bushW * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Small berries/flowers for active states
+    if (state === 'healthy' || state === 'running') {
+        const berryC = GARDEN_FLOWER_COLORS[seed % GARDEN_FLOWER_COLORS.length];
+        for (let i = 0; i < 3; i++) {
+            const bx = x + (i - 1) * bushW * 0.25 + sway;
+            const by = bushY + bushH * 0.1 + Math.sin(i * 2) * 3;
+            ctx.fillStyle = berryC;
+            ctx.beginPath();
+            ctx.arc(bx, by, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+function _gardenDrawWater(ctx, W, H, now) {
+    // Water feature — horizontal stream near bottom of garden area
+    const waterY = H * 0.78;
+    const waterH = 8;
+
+    // Water body
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    const waterGrad = ctx.createLinearGradient(0, waterY, 0, waterY + waterH);
+    waterGrad.addColorStop(0, '#7dd3fc');
+    waterGrad.addColorStop(0.5, GARDEN_WATER);
+    waterGrad.addColorStop(1, '#2563eb');
+    ctx.fillStyle = waterGrad;
+    ctx.fillRect(0, waterY, W, waterH);
+
+    // Animated ripple highlights
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#bae6fd';
+    _gardenState.waterRipples.forEach(rip => {
+        const px = ((rip.offset + now * rip.speed) % 1) * W;
+        const py = waterY + 2 + Math.sin(px * 0.03 + now * 1.5) * rip.amplitude;
+        ctx.beginPath();
+        ctx.ellipse(px, py, 4, 1.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Sparkle
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#ffffff';
+    for (let x = 0; x < W; x += 25) {
+        const sparkleX = x + (now * 15) % 25;
+        const sparkleAlpha = 0.3 + 0.3 * Math.sin(now * 3 + sparkleX * 0.1);
+        ctx.globalAlpha = sparkleAlpha;
+        ctx.beginPath();
+        ctx.arc(sparkleX, waterY + 3, 1, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function _gardenDrawFireflies(ctx, W, H, now) {
+    _gardenState.fireflies.forEach(ff => {
+        ff.x += ff.vx * 0.016;
+        ff.y += ff.vy * 0.016;
+        ff.vx += (Math.sin(now + ff.phase) * 4 - ff.vx * 0.5) * 0.016;
+        ff.vy += (Math.cos(now * 0.7 + ff.phase) * 3 - ff.vy * 0.5) * 0.016;
+        if (ff.x < 0) ff.x = W;
+        if (ff.x > W) ff.x = 0;
+        if (ff.y < H * 0.2) ff.y = H * 0.7;
+        if (ff.y > H * 0.85) ff.y = H * 0.3;
+
+        const glow = ff.brightness * (0.5 + 0.5 * Math.sin(now * 3 + ff.phase));
+        if (glow < 0.2) return;
+
+        // Glow halo
+        const grad = ctx.createRadialGradient(ff.x, ff.y, 0, ff.x, ff.y, 8);
+        grad.addColorStop(0, `rgba(255,215,0,${glow * 0.5})`);
+        grad.addColorStop(1, 'rgba(255,215,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(ff.x, ff.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Core
+        ctx.fillStyle = `rgba(255,255,180,${glow})`;
+        ctx.beginPath();
+        ctx.arc(ff.x, ff.y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function _gardenDrawButterflies(ctx, W, H, now) {
+    _gardenState.butterflies.forEach(bf => {
+        bf.moveTimer -= 0.016;
+        if (bf.moveTimer <= 0) {
+            bf.targetX = Math.random() * W;
+            bf.targetY = H * 0.3 + Math.random() * H * 0.45;
+            bf.moveTimer = 3 + Math.random() * 5;
+        }
+        // Smooth movement
+        bf.x += (bf.targetX - bf.x) * bf.speed * 0.016;
+        bf.y += (bf.targetY - bf.y) * bf.speed * 0.016;
+        bf.wingPhase += 8 * 0.016;
+
+        const wingAngle = Math.sin(bf.wingPhase) * 0.8;
+        const wingSize = 5;
+
+        ctx.save();
+        ctx.translate(bf.x, bf.y);
+
+        // Left wing
+        ctx.fillStyle = bf.color;
+        ctx.save();
+        ctx.scale(Math.cos(wingAngle), 1);
+        ctx.beginPath();
+        ctx.ellipse(-2, 0, wingSize, wingSize * 0.6, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Right wing
+        ctx.save();
+        ctx.scale(Math.cos(wingAngle + 0.5), 1);
+        ctx.beginPath();
+        ctx.ellipse(2, 0, wingSize, wingSize * 0.6, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Body
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(-0.5, -3, 1, 6);
+
+        // Antennae
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -3);
+        ctx.lineTo(-2, -6);
+        ctx.moveTo(0, -3);
+        ctx.lineTo(2, -6);
+        ctx.stroke();
+
+        ctx.restore();
+    });
+}
+
+function _gardenDrawBranch(ctx, entity, pos, now) {
+    const cx = pos.x + pos.w / 2;
+    const cy = pos.y + pos.h / 2;
+    const state = entity.state || 'unknown';
+    const r = Math.max(3, pos.w / 2);
+
+    let color = GARDEN_COLORS[state] || GARDEN_COLORS.unknown;
+    const sway = Math.sin(now * 1.5 + _gardenHash(entity.id || '') * 0.01) * 1;
+
+    // Small leaf cluster
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx + sway, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Leaf highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(cx + sway - r * 0.3, cy - r * 0.3, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+metaphorRenderers.garden = {
+    computeLayout(entities, W, H) {
+        const layout = {};
+        const byId = {};
+        entities.forEach(e => byId[e.id] = e);
+        const roots = entities.filter(e => !e.parent);
+        if (!roots.length) return layout;
+
+        // Reserve top 25% for sky, bottom 12% for foreground grass
+        const skyH = H * 0.25;
+        const groundH = H * 0.12;
+        const gardenTop = skyH;
+        const gardenH = H - skyH - groundH;
+
+        // Garden beds spread horizontally with pathway gaps
+        const nRoots = Math.max(roots.length, 1);
+        const pathwayW = 16;
+        const bedGap = pathwayW + 8;
+        const totalGap = bedGap * (nRoots + 1);
+        const bedW = Math.max(40, (W - totalGap) / nRoots);
+
+        roots.forEach((root, di) => {
+            const bx = bedGap + di * (bedW + bedGap);
+            const by = gardenTop;
+            layout[root.id] = { x: bx, y: by, w: bedW, h: gardenH };
+
+            // Planting rows (nodes) stack vertically
+            const children = (root.children || []).map(id => byId[id]).filter(Boolean);
+            const nChildren = Math.max(children.length, 1);
+            const rowGap = 10;
+            const rowH = (gardenH - rowGap * (nChildren + 1)) / Math.max(nChildren, 1);
+
+            children.forEach((child, ri) => {
+                const rx = bx + rowGap;
+                const ry = by + rowGap + ri * (rowH + rowGap);
+                const rw = bedW - 2 * rowGap;
+                layout[child.id] = { x: rx, y: ry, w: rw, h: rowH };
+
+                // Plants (services) spread along the row
+                const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
+                if (!grandchildren.length) return;
+                const nGc = grandchildren.length;
+                const plantGap = 8;
+                const plantW = Math.max(12, (rw - plantGap * (nGc + 1)) / nGc);
+
+                grandchildren.forEach((gc, gi) => {
+                    const cpu = (gc.metrics || {}).cpu || 30;
+                    const maxPh = rowH - 20;
+                    const ph = Math.max(20, maxPh * (cpu / 100));
+                    const px = rx + plantGap + gi * (plantW + plantGap);
+                    const py = ry + rowH - ph;
+                    layout[gc.id] = { x: px, y: py, w: plantW, h: ph };
+
+                    // Containers (branches) as sub-elements
+                    const greatGrandchildren = (gc.children || []).map(id => byId[id]).filter(Boolean);
+                    if (!greatGrandchildren.length) return;
+                    const nGgc = greatGrandchildren.length;
+                    const branchH = ph / Math.max(nGgc, 1);
+                    greatGrandchildren.forEach((ggc, bi) => {
+                        const branchY = py + bi * branchH;
+                        layout[ggc.id] = {
+                            x: px + plantW * 0.2,
+                            y: branchY,
+                            w: plantW * 0.6,
+                            h: branchH * 0.8,
+                        };
+                    });
+                });
+            });
+        });
+        return layout;
+    },
+
+    render(ctx, entities, layout, W, H, COLORS) {
+        if (!_gardenState.initialized || _gardenState.lastW !== W || _gardenState.lastH !== H) {
+            _gardenInitScene(W, H);
+        }
+        const now = performance.now() / 1000 - _gardenState.startTime;
+        const tod = _gardenGetTimeOfDay();
+        const night = _gardenIsNight(tod);
+
+        // Layer 0: Sky gradient with clouds/stars
+        _gardenDrawSky(ctx, W, H, now, tod);
+
+        // Layer 1: Sun
+        _gardenDrawSun(ctx, W, H, tod, entities);
+
+        // Layer 2: Terrain (grass, soil, noise)
+        _gardenDrawTerrain(ctx, W, H, now);
+
+        // Layer 3: Pathways between beds
+        _gardenDrawPathways(ctx, entities, layout, W, H);
+
+        // Layer 4: Garden beds with fence and soil
+        entities.forEach(e => {
+            const pos = layout[e.id];
+            if (!pos || e.type !== 'cluster') return;
+            _gardenDrawBed(ctx, e, pos, now);
+        });
+
+        // Layer 5: Water feature
+        _gardenDrawWater(ctx, W, H, now);
+
+        // Layer 6: Plants (services) — trees, flowers, bushes
+        entities.forEach(e => {
+            const pos = layout[e.id];
+            if (!pos || e.type !== 'service') return;
+            _gardenDrawPlant(ctx, e, pos, now);
+        });
+
+        // Layer 7: Branches (containers)
+        entities.forEach(e => {
+            const pos = layout[e.id];
+            if (!pos || e.type !== 'container') return;
+            _gardenDrawBranch(ctx, e, pos, now);
+        });
+
+        // Layer 8: Foreground grass blades
+        _gardenState.grassBlades.forEach(tuft => {
+            const sway = Math.sin(now * 1.5 + tuft.phase) * 2;
+            const col = tuft.shade > 0.5 ? GARDEN_GRASS : GARDEN_GRASS_LIGHT;
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(tuft.x, tuft.y);
+            ctx.quadraticCurveTo(tuft.x + sway, tuft.y - tuft.height * 0.6, tuft.x + sway * 1.5, tuft.y - tuft.height);
+            ctx.stroke();
+        });
+
+        // Layer 9: Decorative flowers
+        _gardenState.flowers.forEach(f => {
+            const bob = Math.sin(now * 1.2 + f.phase) * 1;
+            ctx.fillStyle = f.color;
+            ctx.beginPath();
+            ctx.arc(f.x, f.y + bob, f.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.arc(f.x, f.y + bob, f.size * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // Layer 10: Butterflies
+        _gardenDrawButterflies(ctx, W, H, now);
+
+        // Layer 11: Fireflies at night
+        if (night) {
+            _gardenDrawFireflies(ctx, W, H, now);
+        }
+    }
+};
+
 // ============================================================
 // Canvas sizing
 // ============================================================
@@ -1689,6 +2741,24 @@ function switchMetaphor(newMetaphor) {
     setTimeout(() => {
         currentMetaphor = newMetaphor;
         localStorage.setItem('metaphor', newMetaphor);
+
+        // Toggle canvases for 3D metaphors
+        const canvas3d = document.getElementById('canvas3d');
+        const space3dContainer = document.getElementById('space3d-container');
+        if (canvas3d) {
+            if (newMetaphor === 'city3d') {
+                canvas3d.style.display = 'block';
+            } else {
+                canvas3d.style.display = 'none';
+            }
+        }
+        if (space3dContainer) {
+            if (newMetaphor === 'space') {
+                space3dContainer.style.display = 'block';
+            } else {
+                space3dContainer.style.display = 'none';
+            }
+        }
 
         // Update toolbar description
         const meta = availableMetaphors.find(m => m.id === newMetaphor);

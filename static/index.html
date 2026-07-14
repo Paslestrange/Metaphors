@@ -7,29 +7,30 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <body>
-        <div id="canvas-container">
-            <canvas id="canvas"></canvas>
-            <div id="space3d-container"></div>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+        <canvas id="canvas3d" style="display:none;position:absolute;top:0;left:0;"></canvas>
+        <div id="space3d-container"></div>
+    </div>
+    <div id="toolbar"></div>
+    <div id="zoom-controls">
+        <button id="zoom-in" title="Zoom In">+</button>
+        <button id="zoom-reset" title="Reset View">⌂</button>
+        <button id="zoom-out" title="Zoom Out">−</button>
+    </div>
+    <div id="detail-panel">
+        <div id="detail-header">
+            <span id="detail-title"></span>
+            <button id="detail-close">&times;</button>
         </div>
-        <div id="toolbar"></div>
-        <div id="zoom-controls">
-            <button id="zoom-in" title="Zoom In">+</button>
-            <button id="zoom-reset" title="Reset View">⌂</button>
-            <button id="zoom-out" title="Zoom Out">−</button>
-        </div>
-        <div id="detail-panel">
-            <div id="detail-header">
-                <span id="detail-title"></span>
-                <button id="detail-close">&times;</button>
-            </div>
-            <div id="detail-body"></div>
-        </div>
-        <canvas id="minimap"></canvas>
-        <div id="fade-overlay"></div>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-        <script src="/static/space3d.js"></script>
-        <script src="/static/main.js"></script>
-    </body>
+        <div id="detail-body"></div>
+    </div>
+    <canvas id="minimap"></canvas>
+    <div id="fade-overlay"></div>
+    <!-- Three.js CDN — local dev tool, CDN compromise acceptable -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/space3d.js"></script>
+    <script src="/static/city3d.js"></script>
+    <script src="/static/main.js"></script>
 </body>
 </html>

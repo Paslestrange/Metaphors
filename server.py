@@ -30,6 +30,11 @@ async def index():
     return FileResponse("static/index.html")
 
 
+@app.get("/3d")
+async def index_3d():
+    return FileResponse("static/3d/index.html")
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -45,10 +50,12 @@ async def list_metaphors():
     metaphor_info = []
     descriptions = {
         "city": "Infrastructure as a cityscape",
+        "city3d": "Infrastructure as a 3D cyberpunk city",
         "solar": "Systems as orbiting celestial bodies",
         "forest": "Services as a living forest ecosystem",
         "traffic_light": "Infrastructure as traffic signals at an intersection",
         "space": "Systems as a space station with orbiting modules",
+        "garden": "Infrastructure as a garden with plants, terrain, and lighting",
     }
     for name in names:
         metaphor_info.append({
@@ -57,7 +64,7 @@ async def list_metaphors():
             "description": descriptions.get(name, f"The {name} metaphor"),
         })
     # Also include client-side-only metaphors that have frontend renderers
-    known_client = ["solar", "forest", "space"]
+    known_client = ["solar", "forest", "space", "city3d", "garden"]
     for name in known_client:
         if name not in names:
             metaphor_info.append({

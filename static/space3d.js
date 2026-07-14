@@ -321,9 +321,12 @@
 
     // Create docking ports (TorusGeometry rings)
     function createDockingPorts(module, entity) {
-        const services = (entity.children || []).map(id => window.entities?.find(e => e.id === id)).filter(Boolean);
-        
-        services.forEach((service, i) => {
+        const childServices = (entity.children || []).map(id => {
+            // Look up entities from the module's userData
+            const allEntities = module.userData.allEntities || [];
+            return allEntities.find(e => e.id === id);
+        }).filter(Boolean);
+        childServices.forEach((service, i) => {
             const req = service.metrics?.req_per_sec || 0;
             const available = req < 10;
             const color = available ? 0x00ff88 : 0xff2222;
@@ -340,7 +343,7 @@
             const port = new THREE.Mesh(geometry, material);
             
             // Position around module
-            const portAngle = (i / services.length) * Math.PI * 2;
+            const portAngle = (i / childServices.length) * Math.PI * 2;
             const portRadius = 6;
             port.position.set(
                 Math.cos(portAngle) * portRadius,

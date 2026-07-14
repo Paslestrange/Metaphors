@@ -1,98 +1,92 @@
 // static/three-app.js
-// Three.js 3D city renderer for Metaphors project
+// Three.js WebGL city renderer for the Metaphors dashboard
 
 class ThreeApp {
-    constructor() {
+    constructor(container) {
+        this.container = container;
         this.scene = null;
         this.camera = null;
         this.renderer = null;
         this.controls = null;
-        this.buildings = new Map(); // entityId -> mesh
+        this.buildings = new Map(); // entity.id -> mesh
         this.entities = [];
-        this.layout = {};
+        this.pointLights = [];
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
-        this.hoveredBuilding = null;
-        this.selectedBuilding = null;
-        this.pointLights = [];
+        this.hoveredEntity = null;
+        this.selectedEntity = null;
         this.clock = new THREE.Clock();
         this.animating = false;
-        
-        // State colors matching city renderer
+
+        // Colors matching the 2D renderer
         this.COLORS = {
             healthy: 0x4ade80,
             running: 0x60a5fa,
+            idle: 0x94a3b8,
             warning: 0xfbbf24,
+            degraded: 0xf97316,
             critical: 0xef4444,
             stopped: 0x374151,
-            idle: 0x94a3b8,
-            degraded: 0xf97316,
             pending: 0xa78bfa,
             scaling: 0x06b6d4,
-            unknown: 0x6b7280,
+            unknown: 0x6b7280
         };
-        
+
         this.WALL_COLOR = 0x1a1a3e;
         this.GROUND_COLOR = 0x0d0d22;
         this.ROAD_COLOR = 0x111128;
-        this.FOG_COLOR = 0x0a0a1a;
     }
-    
-    init(container) {
-        // Scene setup
+
+    init() {
+        // Scene
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(this.FOG_COLOR, 0.002);
-        
-        // Camera setup - 45 degree angle looking down
-        const aspect = window.innerWidth / window.innerHeight;
+        this.scene.background = new THREE.Color(0x0a0a1a);
+        this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
+
+        // Camera
+        const aspect = this.container.clientWidth / this.container.clientHeight;
         this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-        this.camera.position.set(100, 80, 100);
+        this.camera.position.set(50, 50, 50);
         this.camera.lookAt(0, 0, 0);
-        
-        // Renderer setup
-        this.renderer = new THREE.WebGLRenderer({ 
-            antialias: true,
-            alpha: false
-        });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
+
+        // Renderer
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.setClearColor(this.FOG_COLOR);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        container.appendChild(this.renderer.domElement);
-        
-        // Lighting
-        this.setupLighting();
-        
-        // Ground plane
+        this.container.appendChild(this.renderer.domElement);
+
+        // Lights
+        this.setupLights();
+
+        // Ground
         this.createGround();
-        
-        // OrbitControls
+
+        // Controls
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.maxPolarAngle = Math.PI / 2.2; // Prevent going underground
-        this.controls.minDistance = 20;
-        this.controls.maxDistance = 300;
-        
-        // Event listeners
+        this.controls.maxPolarAngle = Math.PI / 2.2;
+        this.controls.minDistance = 10;
+        this.controls.maxDistance = 200;
+
+        // Events
         window.addEventListener('resize', () => this.resize());
         this.renderer.domElement.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.renderer.domElement.addEventListener('click', (e) => this.onClick(e));
-        
-        // Start animation loop
+
+        // Start animation
         this.animating = true;
         this.animate();
-        
-        return this;
     }
-    
-    setupLighting() {
-        // Ambient light
-        const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+
+    setupLights() {
+        // Ambient
+        const ambient = new THREE.AmbientLight(0x404040, 0.5);
         this.scene.add(ambient);
-        
-        // Directional light (sun/moon)
+
+        // Directional (sun/moon)
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(50, 100, 50);
         dirLight.castShadow = true;
@@ -100,21 +94,18 @@ class ThreeApp {
         dirLight.shadow.camera.right = 100;
         dirLight.shadow.camera.top = 100;
         dirLight.shadow.camera.bottom = -100;
-        dirLight.shadow.camera.near = 0.1;
-        dirLight.shadow.camera.far = 200;
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
         this.scene.add(dirLight);
-        
-        // Hemisphere light for ambient sky
-        const hemiLight = new THREE.HemisphereLight(0x60a5fa, 0x1a1a3e, 0.2);
+
+        // Hemisphere for subtle color variation
+        const hemiLight = new THREE.HemisphereLight(0x1a1a3e, 0x0d0d22, 0.3);
         this.scene.add(hemiLight);
     }
-    
+
     createGround() {
-        // Ground plane
-        const groundGeo = new THREE.PlaneGeometry(500, 500);
-        const groundMat = new THREE.MeshStandardMaterial({ 
+        const groundGeo = new THREE.PlaneGeometry(400, 400);
+        const groundMat = new THREE.MeshStandardMaterial({
             color: this.GROUND_COLOR,
             roughness: 0.9,
             metalness: 0.1
@@ -123,145 +114,118 @@ class ThreeApp {
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         this.scene.add(ground);
-        
-        // Road grid
+
+        // Roads
         this.createRoads();
     }
-    
+
     createRoads() {
-        const roadMat = new THREE.MeshStandardMaterial({ 
+        const roadMat = new THREE.MeshStandardMaterial({
             color: this.ROAD_COLOR,
-            roughness: 0.8,
-            metalness: 0.1
+            roughness: 0.8
         });
-        
-        // Create grid of roads (simplified - 5x5 blocks)
-        const blockSize = 40;
-        const roadWidth = 8;
-        const gridCount = 5;
-        const totalSize = gridCount * blockSize + (gridCount + 1) * roadWidth;
-        const offset = -totalSize / 2;
-        
-        // Horizontal roads
-        for (let i = 0; i <= gridCount; i++) {
-            const roadGeo = new THREE.PlaneGeometry(totalSize, roadWidth);
-            const road = new THREE.Mesh(roadGeo, roadMat);
-            road.rotation.x = -Math.PI / 2;
-            road.position.set(0, 0.01, offset + i * (blockSize + roadWidth) + roadWidth / 2);
-            road.receiveShadow = true;
-            this.scene.add(road);
-        }
-        
-        // Vertical roads
-        for (let i = 0; i <= gridCount; i++) {
-            const roadGeo = new THREE.PlaneGeometry(roadWidth, totalSize);
-            const road = new THREE.Mesh(roadGeo, roadMat);
-            road.rotation.x = -Math.PI / 2;
-            road.position.set(offset + i * (blockSize + roadWidth) + roadWidth / 2, 0.01, 0);
-            road.receiveShadow = true;
-            this.scene.add(road);
+
+        // Grid of roads
+        const gridSize = 20;
+        const spacing = 20;
+
+        for (let i = -gridSize; i <= gridSize; i++) {
+            // Horizontal roads
+            const hRoad = new THREE.Mesh(
+                new THREE.PlaneGeometry(400, 2),
+                roadMat
+            );
+            hRoad.rotation.x = -Math.PI / 2;
+            hRoad.position.y = 0.01;
+            hRoad.position.z = i * spacing;
+            hRoad.receiveShadow = true;
+            this.scene.add(hRoad);
+
+            // Vertical roads
+            const vRoad = new THREE.Mesh(
+                new THREE.PlaneGeometry(2, 400),
+                roadMat
+            );
+            vRoad.rotation.x = -Math.PI / 2;
+            vRoad.position.y = 0.01;
+            vRoad.position.x = i * spacing;
+            vRoad.receiveShadow = true;
+            this.scene.add(vRoad);
         }
     }
-    
-    computeLayout(entities, width, height) {
+
+    computeLayout(entities) {
         const layout = {};
         const byId = {};
-        entities.forEach(e => byId[e.id] = e);
-        
-        // Group entities by parent
+        entities.forEach(e => { byId[e.id] = e; });
+
         const roots = entities.filter(e => !e.parent);
-        const childrenOf = {};
-        entities.forEach(e => {
-            if (e.parent) {
-                if (!childrenOf[e.parent]) childrenOf[e.parent] = [];
-                childrenOf[e.parent].push(e);
-            }
-        });
-        
-        // City block layout
-        const padding = 20;
-        const blockSize = 40;
-        const streetWidth = 15;
-        const blockSpacing = blockSize + streetWidth;
-        
-        let blockIdx = 0;
-        const blocksPerRow = Math.ceil(Math.sqrt(roots.length));
-        
+        const blockSize = 15;
+        const blockSpacing = 25;
+        const cols = Math.ceil(Math.sqrt(roots.length));
+
         roots.forEach((root, i) => {
-            const row = Math.floor(blockIdx / blocksPerRow);
-            const col = blockIdx % blocksPerRow;
-            const blockX = col * blockSpacing + padding;
-            const blockZ = row * blockSpacing + padding;
-            
-            // Root entity (cluster/district)
-            const rootSize = 30;
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const baseX = (col - cols / 2) * blockSpacing;
+            const baseZ = (row - cols / 2) * blockSpacing;
+
+            // Root building (cluster)
             layout[root.id] = {
-                x: blockX + blockSize / 2 - rootSize / 2,
-                y: 0,
-                z: blockZ + blockSize / 2 - rootSize / 2,
-                w: rootSize,
-                h: rootSize,
-                height: 15
+                x: baseX,
+                z: baseZ,
+                w: 8,
+                h: 12,
+                d: 8
             };
-            
+
             // Children (nodes/services)
-            const children = childrenOf[root.id] || [];
+            const children = (root.children || []).map(id => byId[id]).filter(Boolean);
             children.forEach((child, ci) => {
                 const angle = (ci / Math.max(children.length, 1)) * Math.PI * 2;
-                const radius = blockSize * 0.3;
-                const childSize = child.type === 'node' ? 12 : 8;
-                const childHeight = child.type === 'node' ? 10 : 6;
-                
-                const cx = blockX + blockSize / 2 + Math.cos(angle) * radius;
-                const cz = blockZ + blockSize / 2 + Math.sin(angle) * radius;
-                
+                const radius = 10;
+                const cx = baseX + Math.cos(angle) * radius;
+                const cz = baseZ + Math.sin(angle) * radius;
+
                 layout[child.id] = {
-                    x: cx - childSize / 2,
-                    y: 0,
-                    z: cz - childSize / 2,
-                    w: childSize,
-                    h: childSize,
-                    height: childHeight
+                    x: cx,
+                    z: cz,
+                    w: 4,
+                    h: 6,
+                    d: 4
                 };
-                
+
                 // Grandchildren
                 const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
                 grandchildren.forEach((gc, gi) => {
-                    const subAngle = angle + ((gi + 0.5) / Math.max(grandchildren.length, 1)) * Math.PI * 0.5;
-                    const subRadius = 8;
-                    const gcSize = 5;
-                    const gcHeight = 4;
-                    
+                    const subAngle = angle + ((gi / Math.max(grandchildren.length, 1)) * Math.PI * 0.5);
+                    const subRadius = 4;
                     const gx = cx + Math.cos(subAngle) * subRadius;
                     const gz = cz + Math.sin(subAngle) * subRadius;
-                    
+
                     layout[gc.id] = {
-                        x: gx - gcSize / 2,
-                        y: 0,
-                        z: gz - gcSize / 2,
-                        w: gcSize,
-                        h: gcSize,
-                        height: gcHeight
+                        x: gx,
+                        z: gz,
+                        w: 2,
+                        h: 3,
+                        d: 2
                     };
                 });
             });
-            
-            blockIdx++;
         });
-        
+
         return layout;
     }
-    
-    createBuilding(entity, pos) {
+
+    createBuilding(entity, layout) {
+        const pos = layout[entity.id];
+        if (!pos) return null;
+
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
-        
+
         // Building geometry
-        const width = pos.w;
-        const depth = pos.h;
-        const height = pos.height || 10;
-        
-        const geometry = new THREE.BoxGeometry(width, height, depth);
+        const geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
         const material = new THREE.MeshStandardMaterial({
             color: this.WALL_COLOR,
             roughness: 0.7,
@@ -269,334 +233,218 @@ class ThreeApp {
             emissive: color,
             emissiveIntensity: 0.2
         });
-        
+
         const building = new THREE.Mesh(geometry, material);
-        building.position.set(pos.x + width / 2, height / 2, pos.z + depth / 2);
+        building.position.set(pos.x, pos.h / 2, pos.z);
         building.castShadow = true;
         building.receiveShadow = true;
         building.userData = { entityId: entity.id, entity: entity };
-        
-        // Windows (emissive planes on faces)
-        this.addWindows(building, entity, state);
-        
-        // Rooftop details (30% of buildings)
-        if (Math.random() < 0.3) {
-            this.addRooftopDetails(building, width, depth, height);
-        }
-        
+
         this.scene.add(building);
-        
-        // Point light for healthy/running buildings
-        if (state === 'healthy' || state === 'running') {
-            if (this.pointLights.length < 20) {
-                const light = new THREE.PointLight(color, 0.5, 15);
-                light.position.copy(building.position);
-                light.position.y = height * 0.7;
-                this.scene.add(light);
-                this.pointLights.push(light);
-                building.userData.pointLight = light;
-            }
+
+        // Windows (small emissive planes on faces)
+        this.addWindows(building, pos, color);
+
+        // Rooftop details on 30% of buildings
+        if (Math.random() < 0.3 && pos.w > 3) {
+            this.addRooftopDetails(building, pos);
         }
-        
+
+        // Point light for healthy/running
+        if ((state === 'healthy' || state === 'running') && this.pointLights.length < 20) {
+            const light = new THREE.PointLight(color, 0.5, 15);
+            light.position.set(pos.x, pos.h * 0.7, pos.z);
+            this.scene.add(light);
+            this.pointLights.push({ light, entityId: entity.id });
+        }
+
         return building;
     }
-    
-    addWindows(building, entity, state) {
-        const width = building.geometry.parameters.width;
-        const height = building.geometry.parameters.height;
-        const depth = building.geometry.parameters.depth;
-        
-        // Create window texture
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        
-        // Window color based on state
-        let winColor;
-        if (state === 'healthy') winColor = '#fbbf24';
-        else if (state === 'running') winColor = '#88bbff';
-        else if (state === 'warning') winColor = '#f97316';
-        else if (state === 'critical') winColor = '#ff4444';
-        else winColor = '#1a1a2e';
-        
-        ctx.fillStyle = winColor;
-        
-        // Draw windows in grid
-        const winW = 8;
-        const winH = 8;
-        const gapX = 16;
-        const gapY = 16;
-        
-        for (let y = 8; y < 64; y += gapY) {
-            for (let x = 8; x < 64; x += gapX) {
-                if (Math.random() > 0.3) { // 70% windows lit
-                    ctx.fillRect(x, y, winW, winH);
-                }
-            }
-        }
-        
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(width / 10, height / 10);
-        
-        // Create window planes for each face
+
+    addWindows(building, pos, color) {
         const windowMat = new THREE.MeshBasicMaterial({
-            map: texture,
+            color: color,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.6
         });
-        
-        // Front and back
-        const fbGeo = new THREE.PlaneGeometry(width, height);
-        const front = new THREE.Mesh(fbGeo, windowMat);
-        front.position.z = depth / 2 + 0.01;
-        building.add(front);
-        
-        const back = new THREE.Mesh(fbGeo, windowMat);
-        back.position.z = -depth / 2 - 0.01;
-        back.rotation.y = Math.PI;
-        building.add(back);
-        
-        // Left and right
-        const lrGeo = new THREE.PlaneGeometry(depth, height);
-        const left = new THREE.Mesh(lrGeo, windowMat);
-        left.position.x = -width / 2 - 0.01;
-        left.rotation.y = -Math.PI / 2;
-        building.add(left);
-        
-        const right = new THREE.Mesh(lrGeo, windowMat);
-        right.position.x = width / 2 + 0.01;
-        right.rotation.y = Math.PI / 2;
-        building.add(right);
-    }
-    
-    addRooftopDetails(building, width, depth, height) {
-        // HVAC unit
-        const hvacGeo = new THREE.BoxGeometry(width * 0.15, height * 0.05, depth * 0.15);
-        const hvacMat = new THREE.MeshStandardMaterial({ color: 0x2a2a40 });
-        const hvac = new THREE.Mesh(hvacGeo, hvacMat);
-        hvac.position.set(-width * 0.3, height / 2 + height * 0.025, -depth * 0.3);
-        hvac.castShadow = true;
-        building.add(hvac);
-        
-        // Antenna
-        if (width > 15) {
-            const antennaGeo = new THREE.CylinderGeometry(0.1, 0.1, height * 0.15);
-            const antennaMat = new THREE.MeshStandardMaterial({ color: 0x3a3a5a });
-            const antenna = new THREE.Mesh(antennaGeo, antennaMat);
-            antenna.position.set(0, height / 2 + height * 0.075, 0);
-            antenna.castShadow = true;
-            building.add(antenna);
-        }
-    }
-    
-    updateEntities(entities) {
-        this.entities = entities;
-        
-        // Compute layout
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        this.layout = this.computeLayout(entities, width, height);
-        
-        // Track which entities we've seen
-        const seen = new Set();
-        
-        // Update or create buildings
-        entities.forEach(entity => {
-            seen.add(entity.id);
-            const pos = this.layout[entity.id];
-            if (!pos) return;
-            
-            if (this.buildings.has(entity.id)) {
-                // Update existing building
-                const building = this.buildings.get(entity.id);
-                this.updateBuildingState(building, entity);
-            } else {
-                // Create new building
-                const building = this.createBuilding(entity, pos);
-                this.buildings.set(entity.id, building);
-            }
-        });
-        
-        // Remove buildings for entities that no longer exist
-        for (const [entityId, building] of this.buildings) {
-            if (!seen.has(entityId)) {
-                // Remove point light if exists
-                if (building.userData.pointLight) {
-                    this.scene.remove(building.userData.pointLight);
-                    const lightIdx = this.pointLights.indexOf(building.userData.pointLight);
-                    if (lightIdx > -1) this.pointLights.splice(lightIdx, 1);
+
+        // Front and back faces
+        const windowSize = 0.3;
+        const spacing = 1.5;
+        const numWindows = Math.floor(pos.w / spacing);
+
+        for (let i = 0; i < numWindows; i++) {
+            for (let j = 0; j < Math.floor(pos.h / spacing); j++) {
+                if (Math.random() > 0.3) { // 70% chance of window
+                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                    const window1 = new THREE.Mesh(windowGeo, windowMat);
+                    window1.position.set(
+                        -pos.w / 2 + spacing / 2 + i * spacing,
+                        -pos.h / 2 + spacing / 2 + j * spacing,
+                        pos.d / 2 + 0.01
+                    );
+                    building.add(window1);
+
+                    const window2 = new THREE.Mesh(windowGeo, windowMat);
+                    window2.position.set(
+                        -pos.w / 2 + spacing / 2 + i * spacing,
+                        -pos.h / 2 + spacing / 2 + j * spacing,
+                        -pos.d / 2 - 0.01
+                    );
+                    window2.rotation.y = Math.PI;
+                    building.add(window2);
                 }
-                
-                // Remove building
-                this.scene.remove(building);
-                building.geometry.dispose();
-                building.material.dispose();
-                building.traverse((child) => {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) {
-                        if (child.material.map) child.material.map.dispose();
-                        child.material.dispose();
-                    }
-                });
-                this.buildings.delete(entityId);
             }
         }
     }
-    
-    updateBuildingState(building, entity) {
+
+    addRooftopDetails(building, pos) {
+        // AC unit
+        const acGeo = new THREE.BoxGeometry(pos.w * 0.2, 0.5, pos.d * 0.2);
+        const acMat = new THREE.MeshStandardMaterial({ color: 0x2a2a4a });
+        const ac = new THREE.Mesh(acGeo, acMat);
+        ac.position.set(pos.w * 0.25, pos.h / 2 + 0.25, pos.d * 0.25);
+        ac.castShadow = true;
+        building.add(ac);
+    }
+
+    updateEntities(entities) {
+        const layout = this.computeLayout(entities);
+        const currentIds = new Set(entities.map(e => e.id));
+
+        // Remove buildings that no longer exist
+        for (const [id, mesh] of this.buildings) {
+            if (!currentIds.has(id)) {
+                this.scene.remove(mesh);
+                mesh.geometry.dispose();
+                mesh.material.dispose();
+                this.buildings.delete(id);
+            }
+        }
+
+        // Add or update buildings
+        entities.forEach(entity => {
+            if (this.buildings.has(entity.id)) {
+                // Update existing
+                const mesh = this.buildings.get(entity.id);
+                this.updateBuildingState(mesh, entity);
+            } else {
+                // Create new
+                const mesh = this.createBuilding(entity, layout);
+                if (mesh) {
+                    this.buildings.set(entity.id, mesh);
+                }
+            }
+        });
+
+        this.entities = entities;
+    }
+
+    updateBuildingState(mesh, entity) {
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
-        
-        // Update material emissive
-        building.material.emissive.setHex(color);
-        building.material.emissiveIntensity = state === 'critical' ? 0.5 : 0.2;
-        
-        // Update point light
-        if (building.userData.pointLight) {
-            if (state === 'healthy' || state === 'running') {
-                building.userData.pointLight.color.setHex(color);
-                building.userData.pointLight.visible = true;
-            } else {
-                building.userData.pointLight.visible = false;
-            }
-        }
+        mesh.material.emissive.setHex(color);
+        mesh.userData.entity = entity;
     }
-    
+
     animate() {
         if (!this.animating) return;
-        
+
         requestAnimationFrame(() => this.animate());
-        
+
         const delta = this.clock.getDelta();
-        const time = this.clock.getElapsedTime();
-        
-        // Animate critical buildings (pulsing)
-        for (const [entityId, building] of this.buildings) {
-            const entity = building.userData.entity;
-            if (entity.state === 'critical') {
-                const pulse = 0.3 + 0.2 * Math.sin(time * 8);
-                building.material.emissiveIntensity = pulse;
-            } else if (entity.state === 'pending') {
-                // Flicker
-                const flicker = 0.1 + 0.1 * Math.sin(time * 12 + entityId.length);
-                building.material.emissiveIntensity = flicker;
-            }
-        }
-        
+        const elapsed = this.clock.getElapsedTime();
+
         // Update controls
         this.controls.update();
-        
+
+        // Animate buildings
+        this.buildings.forEach((mesh, id) => {
+            const entity = mesh.userData.entity;
+            const state = entity.state || 'unknown';
+
+            // Critical: pulse emissive
+            if (state === 'critical') {
+                const pulse = 0.2 + 0.3 * Math.abs(Math.sin(elapsed * 4));
+                mesh.material.emissiveIntensity = pulse;
+            }
+            // Scaling: animate height
+            else if (state === 'scaling') {
+                const scale = 1 + 0.1 * Math.sin(elapsed * 2);
+                mesh.scale.y = scale;
+            }
+            // Pending: flicker windows
+            else if (state === 'pending') {
+                const flicker = Math.random() > 0.5 ? 0.2 : 0.1;
+                mesh.material.emissiveIntensity = flicker;
+            }
+        });
+
         // Render
         this.renderer.render(this.scene, this.camera);
     }
-    
+
     onMouseMove(event) {
         const rect = this.renderer.domElement.getBoundingClientRect();
         this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-        
+
         this.raycaster.setFromCamera(this.mouse, this.camera);
         const intersects = this.raycaster.intersectObjects(Array.from(this.buildings.values()));
-        
-        // Reset previous hover
-        if (this.hoveredBuilding && this.hoveredBuilding !== this.selectedBuilding) {
-            this.hoveredBuilding.material.opacity = 1;
-        }
-        
+
         if (intersects.length > 0) {
-            this.hoveredBuilding = intersects[0].object;
-            this.hoveredBuilding.material.opacity = 0.8;
+            const mesh = intersects[0].object;
+            this.hoveredEntity = mesh.userData.entity;
             this.renderer.domElement.style.cursor = 'pointer';
-            
+
             // Dispatch custom event for main.js
-            const event = new CustomEvent('building-hover', {
-                detail: { entity: this.hoveredBuilding.userData.entity }
-            });
-            window.dispatchEvent(event);
+            window.dispatchEvent(new CustomEvent('three-hover', { detail: { entity: this.hoveredEntity } }));
         } else {
-            this.hoveredBuilding = null;
+            this.hoveredEntity = null;
             this.renderer.domElement.style.cursor = 'grab';
-            
-            const event = new CustomEvent('building-hover', { detail: { entity: null } });
-            window.dispatchEvent(event);
+            window.dispatchEvent(new CustomEvent('three-hover', { detail: { entity: null } }));
         }
     }
-    
+
     onClick(event) {
-        if (this.hoveredBuilding) {
-            // Reset previous selection
-            if (this.selectedBuilding) {
-                this.selectedBuilding.scale.set(1, 1, 1);
-            }
-            
-            this.selectedBuilding = this.hoveredBuilding;
-            this.selectedBuilding.scale.set(1.05, 1.05, 1.05);
-            
-            // Dispatch custom event for main.js
-            const event = new CustomEvent('building-click', {
-                detail: { entity: this.selectedBuilding.userData.entity }
-            });
-            window.dispatchEvent(event);
+        if (this.hoveredEntity) {
+            this.selectedEntity = this.hoveredEntity;
+            window.dispatchEvent(new CustomEvent('three-click', { detail: { entity: this.selectedEntity } }));
         } else {
-            // Deselect
-            if (this.selectedBuilding) {
-                this.selectedBuilding.scale.set(1, 1, 1);
-                this.selectedBuilding = null;
-                
-                const event = new CustomEvent('building-click', { detail: { entity: null } });
-                window.dispatchEvent(event);
-            }
+            this.selectedEntity = null;
+            window.dispatchEvent(new CustomEvent('three-click', { detail: { entity: null } }));
         }
     }
-    
+
     resize() {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        
+        const width = this.container.clientWidth;
+        const height = this.container.clientHeight;
+
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        
         this.renderer.setSize(width, height);
     }
-    
+
     dispose() {
         this.animating = false;
-        
-        // Dispose buildings
-        for (const [entityId, building] of this.buildings) {
-            if (building.userData.pointLight) {
-                this.scene.remove(building.userData.pointLight);
-            }
-            this.scene.remove(building);
-            building.geometry.dispose();
-            building.material.dispose();
-            building.traverse((child) => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) {
-                    if (child.material.map) child.material.map.dispose();
-                    child.material.dispose();
-                }
-            });
-        }
-        this.buildings.clear();
-        
-        // Dispose scene
-        this.scene.traverse((object) => {
-            if (object.geometry) object.geometry.dispose();
-            if (object.material) {
-                if (object.material.map) object.material.map.dispose();
-                object.material.dispose();
-            }
+
+        // Remove all buildings
+        this.buildings.forEach((mesh) => {
+            this.scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.dispose();
         });
-        
+        this.buildings.clear();
+
+        // Remove point lights
+        this.pointLights.forEach(({ light }) => {
+            this.scene.remove(light);
+        });
+        this.pointLights = [];
+
         // Dispose renderer
         this.renderer.dispose();
-        
-        // Remove controls
-        this.controls.dispose();
+        this.container.removeChild(this.renderer.domElement);
     }
 }
 
