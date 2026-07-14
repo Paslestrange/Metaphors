@@ -101,6 +101,66 @@ class CityRenderer3D {
         return this;
     }
     
+    // ----------------------------------------------------------------
+    // HOVER / RAYCASTING
+    // ----------------------------------------------------------------
+
+    _setupHover() {
+        const canvas = this.renderer.domElement;
+
+        this._onMouseMove = (event) => {
+            const now = performance.now();
+            if (now - this._lastRaycastTs < this._raycastInterval) return;
+            this._lastRaycastTs = now;
+
+            const rect = canvas.getBoundingClientRect();
+            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+
+            const meshes = Array.from(this.buildings.values());
+            const intersects = this.raycaster.intersectObjects(meshes, false);
+
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+                if (hitMesh !== this.hoveredMesh) {
+                    this._unhover();
+                    this._hover(hitMesh);
+                }
+                canvas.style.cursor = 'pointer';
+            } else {
+                this._unhover();
+                canvas.style.cursor = 'default';
+            }
+        };
+
+        this._onMouseLeave = () => {
+            this._unhover();
+            canvas.style.cursor = 'default';
+        };
+
+        canvas.addEventListener('mousemove', this._onMouseMove);
+        canvas.addEventListener('mouseleave', this._onMouseLeave);
+    }
+
+    _hover(mesh) {
+        this.hoveredMesh = mesh;
+        mesh.userData._origEmissiveIntensity = mesh.material.emissiveIntensity;
+        mesh.material.emissiveIntensity = (mesh.userData._origEmissiveIntensity || 0.2) * 1.5;
+    }
+
+    _unhover() {
+        if (!this.hoveredMesh) return;
+        const mesh = this.hoveredMesh;
+        const orig = mesh.userData._origEmissiveIntensity;
+        if (orig !== undefined) {
+            mesh.material.emissiveIntensity = orig;
+            delete mesh.userData._origEmissiveIntensity;
+        }
+        this.hoveredMesh = null;
+    }
+
     setupLights() {
         // Ambient light
         const ambient = new THREE.AmbientLight(0x404040, 0.5);
@@ -483,7 +543,6 @@ class CityRenderer3D {
         return sprite;
     }
     createWindowTexture(pos, state) {
-        // CanvasTexture with grid of lit/dark window squares as emissive map
         const cols = Math.max(2, Math.floor(pos.w * 1.5));
         const rows = Math.max(3, Math.floor(pos.h * 1.5));
         const cellW = 16;
@@ -493,7 +552,6 @@ class CityRenderer3D {
         canvas.height = rows * cellH;
         const ctx = canvas.getContext('2d');
 
-        // Window color per state
         let litColor, darkColor;
         switch (state) {
             case 'healthy':
@@ -510,15 +568,13 @@ class CityRenderer3D {
                 litColor = '#6b7280'; darkColor = '#111118';
         }
 
-        // Fill background (building wall between windows)
         ctx.fillStyle = '#1a1a3e';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw window grid
         const padding = 3;
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-                const lit = Math.random() > 0.3; // 70% lit
+                const lit = Math.random() > 0.3;
                 ctx.fillStyle = lit ? litColor : darkColor;
                 ctx.fillRect(
                     c * cellW + padding,
@@ -536,50 +592,41 @@ class CityRenderer3D {
         return { texture, litColor, state };
     }
 
-    
     createBuilding(entity, layout) {
         const pos = layout[entity.id];
         if (!pos) return null;
-        
+
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
-        
-        // Building geometry
+        const windowData = this.createWindowTexture(pos, state);
+
         const geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
         const material = new THREE.MeshStandardMaterial({
             color: this.WALL_COLOR,
             roughness: 0.7,
             metalness: 0.3,
-            emissive: color,
-            emissiveIntensity: 0.2
+            emissiveMap: windowData.texture,
+            emissive: new THREE.Color(windowData.litColor),
+            emissiveIntensity: state === 'stopped' ? 0.05 : 0.6
         });
-        
+
         const building = new THREE.Mesh(geometry, material);
         building.position.set(pos.x, pos.h / 2, pos.z);
         building.castShadow = true;
         building.receiveShadow = true;
-        building.userData = { entity: entity };
-        
+        building.userData = { entity: entity, windowData: windowData };
+
         this.scene.add(building);
 
-        // ── Label sprite above rooftop (service-level only) ──
-        if (entity.type === 'service') {
-            const label = this._createLabelSprite(entity.name || entity.id, color);
-            const labelY = pos.h + 2.5; // float above rooftop
-            label.position.set(pos.x, labelY, pos.z);
-            label.userData = { entityId: entity.id, isLabel: true };
-            this.scene.add(label);
-            this.labels.set(entity.id, label);
-        }
-        
-        // Windows
-        this.addWindows(building, pos, color);
-        
-        // Rooftop details on 30% of buildings
-        if (Math.random() < 0.3 && pos.w > 3) {
-            this.addRooftopDetails(building, pos);
-        }
-        
+        // Neon edge outline in state color
+        this.addBuildingEdges(building, pos, color);
+
+        // Rooftop: HVAC + antenna on tall buildings
+        this.addRooftopDetails(building, pos);
+
+        // Entrance awning at base front
+        this.addEntrance(building, pos);
+
         // Point light for healthy/running
         if ((state === 'healthy' || state === 'running') && this.pointLights.length < 20) {
             const light = new THREE.PointLight(color, 0.5, 15);
@@ -587,91 +634,81 @@ class CityRenderer3D {
             this.scene.add(light);
             this.pointLights.push({ light, entityId: entity.id });
         }
-        
+
         return building;
     }
-    
-    addWindows(building, pos, color) {
-        const windowMat = new THREE.MeshBasicMaterial({
+
+    addBuildingEdges(building, pos, color) {
+        const edgesGeo = new THREE.EdgesGeometry(
+            new THREE.BoxGeometry(pos.w, pos.h, pos.d)
+        );
+        const edgesMat = new THREE.LineBasicMaterial({
             color: color,
             transparent: true,
-            opacity: 0.6
+            opacity: 0.7
         });
-        
-        // Create windows on front/back and left/right faces
-        const windowSize = 0.4;
-        const spacing = 1.5;
-        const numWindowsX = Math.floor(pos.w / spacing);
-        const numWindowsY = Math.floor(pos.h / spacing);
-        
-        for (let i = 0; i < numWindowsX; i++) {
-            for (let j = 0; j < numWindowsY; j++) {
-                if (Math.random() > 0.3) { // 70% chance of window
-                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
-                    
-                    // Front face
-                    const window1 = new THREE.Mesh(windowGeo, windowMat);
-                    window1.position.set(
-                        -pos.w / 2 + spacing / 2 + i * spacing,
-                        -pos.h / 2 + spacing / 2 + j * spacing,
-                        pos.d / 2 + 0.01
-                    );
-                    building.add(window1);
-                    
-                    // Back face
-                    const window2 = new THREE.Mesh(windowGeo, windowMat);
-                    window2.position.set(
-                        -pos.w / 2 + spacing / 2 + i * spacing,
-                        -pos.h / 2 + spacing / 2 + j * spacing,
-                        -pos.d / 2 - 0.01
-                    );
-                    window2.rotation.y = Math.PI;
-                    building.add(window2);
-                    
-                    // Left face
-                    const window3 = new THREE.Mesh(windowGeo, windowMat);
-                    window3.position.set(
-                        -pos.w / 2 - 0.01,
-                        -pos.h / 2 + spacing / 2 + j * spacing,
-                        -pos.d / 2 + spacing / 2 + i * spacing
-                    );
-                    window3.rotation.y = -Math.PI / 2;
-                    building.add(window3);
-                    
-                    // Right face
-                    const window4 = new THREE.Mesh(windowGeo, windowMat);
-                    window4.position.set(
-                        pos.w / 2 + 0.01,
-                        -pos.h / 2 + spacing / 2 + j * spacing,
-                        -pos.d / 2 + spacing / 2 + i * spacing
-                    );
-                    window4.rotation.y = Math.PI / 2;
-                    building.add(window4);
-                }
-            }
-        }
+        const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+        building.add(edges);
+        building.userData.edgesMesh = edges;
     }
-    
+
+    addEntrance(building, pos) {
+        const awningW = pos.w * 1.15;
+        const awningH = Math.max(0.4, pos.h * 0.12);
+        const awningD = pos.d * 0.25;
+        const awningGeo = new THREE.BoxGeometry(awningW, awningH, awningD);
+        const awningMat = new THREE.MeshStandardMaterial({
+            color: 0x2a2a5a,
+            roughness: 0.5,
+            metalness: 0.4,
+            emissive: 0x3a3a6a,
+            emissiveIntensity: 0.2
+        });
+        const awning = new THREE.Mesh(awningGeo, awningMat);
+        awning.position.set(0, -pos.h / 2 + awningH / 2, pos.d / 2 + awningD / 2);
+        awning.castShadow = true;
+        building.add(awning);
+    }
+
     addRooftopDetails(building, pos) {
-        // AC unit
-        const acGeo = new THREE.BoxGeometry(pos.w * 0.2, 0.5, pos.d * 0.2);
-        const acMat = new THREE.MeshStandardMaterial({ color: 0x2a2a4a });
-        const ac = new THREE.Mesh(acGeo, acMat);
-        ac.position.set(pos.w * 0.25, pos.h / 2 + 0.25, pos.d * 0.25);
-        ac.castShadow = true;
-        building.add(ac);
-        
-        // Antenna
-        if (pos.w > 5) {
-            const antennaGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.5);
-            const antennaMat = new THREE.MeshStandardMaterial({ color: 0x3a3a5a });
+        // HVAC unit on top
+        const hvacW = pos.w * 0.25;
+        const hvacH = 0.6;
+        const hvacD = pos.d * 0.25;
+        const hvacGeo = new THREE.BoxGeometry(hvacW, hvacH, hvacD);
+        const hvacMat = new THREE.MeshStandardMaterial({
+            color: 0x2a2a4a,
+            roughness: 0.6,
+            metalness: 0.4
+        });
+        const hvac = new THREE.Mesh(hvacGeo, hvacMat);
+        hvac.position.set(pos.w * 0.2, pos.h / 2 + hvacH / 2, pos.d * 0.15);
+        hvac.castShadow = true;
+        building.add(hvac);
+
+        // Antenna for taller buildings (h > 8)
+        if (pos.h > 8) {
+            const antennaGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.0, 6);
+            const antennaMat = new THREE.MeshStandardMaterial({
+                color: 0x3a3a5a,
+                metalness: 0.6,
+                roughness: 0.4
+            });
             const antenna = new THREE.Mesh(antennaGeo, antennaMat);
-            antenna.position.set(-pos.w * 0.2, pos.h / 2 + 0.75, -pos.d * 0.2);
+            antenna.position.set(-pos.w * 0.2, pos.h / 2 + 1.0, -pos.d * 0.2);
             antenna.castShadow = true;
             building.add(antenna);
+
+            // Red blinking light on antenna tip
+            const blinkGeo = new THREE.SphereGeometry(0.08, 8, 8);
+            const blinkMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const blink = new THREE.Mesh(blinkGeo, blinkMat);
+            blink.position.set(-pos.w * 0.2, pos.h / 2 + 2.0, -pos.d * 0.2);
+            building.add(blink);
+            building.userData.antennaLight = blink;
         }
     }
-    
+
     createStarField() {
         // 1000 stars in upper hemisphere
         const starGeo = new THREE.BufferGeometry();
@@ -781,6 +818,8 @@ class CityRenderer3D {
         // Remove buildings + labels that no longer exist
         for (const [id, mesh] of this.buildings) {
             if (!currentIds.has(id)) {
+                // If this was the hovered mesh, clear hover state
+                if (this.hoveredMesh === mesh) this._unhover();
                 this.scene.remove(mesh);
                 mesh.geometry.dispose();
                 mesh.material.dispose();
@@ -821,7 +860,7 @@ class CityRenderer3D {
         
         this.entities = entities;
     }
-    
+
     updateBuildingState(mesh, entity) {
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
@@ -836,7 +875,6 @@ class CityRenderer3D {
                 d: mesh.geometry.parameters.depth
             };
             const newWindowData = this.createWindowTexture(pos, state);
-            // Dispose old texture
             if (prevData && prevData.texture) prevData.texture.dispose();
             mesh.material.emissiveMap = newWindowData.texture;
             mesh.material.emissive.set(newWindowData.litColor);
@@ -850,7 +888,7 @@ class CityRenderer3D {
             mesh.userData.edgesMesh.material.color.setHex(color);
         }
     }
-    
+
     animate() {
         if (!this.animating) return;
         
@@ -859,14 +897,13 @@ class CityRenderer3D {
         const delta = this.clock.getDelta();
         const elapsed = this.clock.getElapsedTime();
         
-        // Update controls
         this.controls.update();
         
         // Animate rain particles
         if (this.rainParticles) {
             const positions = this.rainParticles.geometry.attributes.position.array;
             for (let i = 0; i < 500; i++) {
-                positions[i * 3 + 1] -= 0.5; // Fall speed
+                positions[i * 3 + 1] -= 0.5;
                 if (positions[i * 3 + 1] < 0) {
                     positions[i * 3 + 1] = 100;
                 }
@@ -874,29 +911,37 @@ class CityRenderer3D {
             this.rainParticles.geometry.attributes.position.needsUpdate = true;
         }
         
-        // Animate buildings
+        // Animate buildings per state
         this.buildings.forEach((mesh, id) => {
+            if (mesh === this.hoveredMesh) return;
+
             const entity = mesh.userData.entity;
             const state = entity.state || 'unknown';
-            
-            // Critical: pulse emissive
-            if (state === 'critical') {
-                const pulse = 0.2 + 0.3 * Math.abs(Math.sin(elapsed * 4));
+
+            if (state === 'warning' || state === 'degraded') {
+                const pulse = 0.3 + 0.4 * Math.abs(Math.sin(elapsed * 2));
                 mesh.material.emissiveIntensity = pulse;
-            }
-            // Scaling: animate height
-            else if (state === 'scaling') {
+            } else if (state === 'critical') {
+                const strobe = Math.sin(elapsed * 8) > 0 ? 0.9 : 0.15;
+                mesh.material.emissiveIntensity = strobe;
+            } else if (state === 'stopped') {
+                mesh.material.emissiveIntensity = 0.05;
+            } else if (state === 'scaling') {
                 const scale = 1 + 0.1 * Math.sin(elapsed * 2);
                 mesh.scale.y = scale;
-            }
-            // Pending: flicker windows
-            else if (state === 'pending') {
+            } else if (state === 'pending') {
                 const flicker = Math.random() > 0.5 ? 0.2 : 0.1;
                 mesh.material.emissiveIntensity = flicker;
+            } else {
+                mesh.material.emissiveIntensity = 0.6;
+            }
+
+            if (mesh.userData.antennaLight) {
+                const blink = Math.sin(elapsed * 3) > 0.5;
+                mesh.userData.antennaLight.visible = blink;
             }
         });
         
-        // Render
         this.renderer.render(this.scene, this.camera);
     }
     
@@ -911,6 +956,15 @@ class CityRenderer3D {
     
     dispose() {
         this.animating = false;
+
+        // Remove hover listeners
+        if (this._onMouseMove && this.renderer && this.renderer.domElement) {
+            this.renderer.domElement.removeEventListener('mousemove', this._onMouseMove);
+            this.renderer.domElement.removeEventListener('mouseleave', this._onMouseLeave);
+        }
+        this._onMouseMove = null;
+        this._onMouseLeave = null;
+        this.hoveredMesh = null;
         
         // Remove all buildings
         this.buildings.forEach((mesh) => {
