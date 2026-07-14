@@ -112,7 +112,8 @@
                 { id: 'solar', name: 'Solar', description: 'Systems as orbiting celestial bodies' },
                 { id: 'forest', name: 'Forest', description: 'Services as a 3D forest ecosystem' },
                 { id: 'traffic_light', name: 'Traffic Light', description: 'Urban intersection with signal colors' },
-                { id: 'space', name: 'Space Station', description: 'Orbital station in deep space' }
+                { id: 'space', name: 'Space Station', description: 'Orbital station in deep space' },
+                { id: 'garden', name: 'Garden', description: 'Infrastructure as a living garden' }
             ];
             buildToolbar();
         }
