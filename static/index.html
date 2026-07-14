@@ -7,8 +7,11 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div id="app">
-        <canvas id="canvas"></canvas>
+    <body>
+        <div id="canvas-container">
+            <canvas id="canvas"></canvas>
+            <div id="space3d-container"></div>
+        </div>
         <div id="toolbar"></div>
         <div id="zoom-controls">
             <button id="zoom-in" title="Zoom In">+</button>
@@ -24,7 +27,9 @@
         </div>
         <canvas id="minimap"></canvas>
         <div id="fade-overlay"></div>
-    </div>
-    <script src="/static/main.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+        <script src="/static/space3d.js"></script>
+        <script src="/static/main.js"></script>
+    </body>
 </body>
 </html>

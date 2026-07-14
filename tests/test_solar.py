@@ -190,9 +190,20 @@ class TestSolarRendererRender:
             def createRadialGradient(self, *a): 
                 self.calls.append(("createRadialGradient", a))
                 return MockGradient()
+            def createLinearGradient(self, *a):
+                self.calls.append(("createLinearGradient", a))
+                return MockGradient()
             def moveTo(self, *a): self.calls.append(("moveTo", a))
             def lineTo(self, *a): self.calls.append(("lineTo", a))
             def setLineDash(self, *a): self.calls.append(("setLineDash", a))
+            def translate(self, *a): self.calls.append(("translate", a))
+            def rotate(self, *a): self.calls.append(("rotate", a))
+            def ellipse(self, *a): self.calls.append(("ellipse", a))
+            def clip(self): self.calls.append(("clip",))
+            def shadowColor(self, *a): self.calls.append(("shadowColor", a))
+            def shadowBlur(self, *a): self.calls.append(("shadowBlur", a))
+            def shadowColor(self, *a): self.calls.append(("shadowColor", a))
+            def shadowBlur(self, *a): self.calls.append(("shadowBlur", a))
 
         class MockGradient:
             def addColorStop(self, *a): pass

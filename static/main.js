@@ -1565,106 +1565,32 @@ metaphorRenderers.traffic_light = {
     }
 };
 
-// Space Station metaphor - Deep space with orbital layout
+// Space Station metaphor - 3D Three.js renderer
 metaphorRenderers.space = {
+    _initialized: false,
+    _container: null,
+    
     computeLayout(entities, W, H) {
-        const layout = {};
-        const cx = W / 2;
-        const cy = H / 2;
-        const roots = entities.filter(e => !e.parent);
-        const byId = {};
-        entities.forEach(e => byId[e.id] = e);
-
-        roots.forEach((root, i) => {
-            const orbitR = 80 + i * 90;
-            const angle = (i / Math.max(roots.length, 1)) * Math.PI * 2;
-            const px = cx + Math.cos(angle) * orbitR;
-            const py = cy + Math.sin(angle) * orbitR;
-            layout[root.id] = { x: px - 20, y: py - 20, w: 40, h: 40 };
-
-            const children = (root.children || []).map(id => byId[id]).filter(Boolean);
-            children.forEach((child, ci) => {
-                const childAngle = angle + (ci / Math.max(children.length, 1)) * Math.PI * 0.5;
-                const childR = 30;
-                const sx = px + Math.cos(childAngle) * childR;
-                const sy = py + Math.sin(childAngle) * childR;
-                const size = 24;
-                layout[child.id] = { x: sx - size/2, y: sy - size/2, w: size, h: size };
-
-                const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
-                grandchildren.forEach((gc, gi) => {
-                    const subAngle = childAngle + (gi / Math.max(grandchildren.length, 1)) * Math.PI * 0.3;
-                    const subR = 18;
-                    const gx = sx + Math.cos(subAngle) * subR;
-                    const gy = sy + Math.sin(subAngle) * subR;
-                    const ss = 14;
-                    layout[gc.id] = { x: gx - ss/2, y: gy - ss/2, w: ss, h: ss };
-                });
-            });
-        });
-        return layout;
+        // Use Python backend layout (already computed)
+        // 3D renderer will use this layout data
+        return {};
     },
 
     render(ctx, entities, layout, W, H, COLORS) {
-        const gradient = ctx.createLinearGradient(0, 0, 0, H);
-        gradient.addColorStop(0, '#000011');
-        gradient.addColorStop(1, '#0a0a1a');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, W, H);
-
-        const now = performance.now() / 1000;
-        for (let i = 0; i < 100; i++) {
-            const x = (i * 137.5) % W;
-            const y = (i * 97.3) % H;
-            const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(now * 0.5 + i));
-            ctx.globalAlpha = twinkle;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(x, y, 1, 1);
+        // Initialize 3D renderer on first call
+        if (!this._initialized) {
+            const container = document.getElementById('space3d-container');
+            if (container && window.Space3D) {
+                this._container = container;
+                window.Space3D.init(container);
+                this._initialized = true;
+            }
         }
-        ctx.globalAlpha = 1.0;
 
-        const cx = W / 2;
-        const cy = H / 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 25, 0, Math.PI * 2);
-        ctx.fillStyle = '#fbbf24';
-        ctx.fill();
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = '#fbbf24';
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        const roots = entities.filter(e => !e.parent);
-        roots.forEach((root, i) => {
-            const orbitR = 80 + i * 90;
-            ctx.beginPath();
-            ctx.arc(cx, cy, orbitR, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(96, 165, 250, 0.2)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        });
-
-        entities.forEach(entity => {
-            const pos = layout[entity.id];
-            if (!pos) return;
-            const color = COLORS[entity.state] || COLORS.unknown;
-            const ecx = pos.x + pos.w / 2;
-            const ecy = pos.y + pos.h / 2;
-            const r = pos.w / 2;
-
-            ctx.beginPath();
-            ctx.arc(ecx, ecy, r, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.fill();
-            ctx.shadowBlur = 6;
-            ctx.shadowColor = color;
-            ctx.fill();
-            ctx.shadowBlur = 0;
-
-            ctx.fillStyle = '#e5e7eb';
-            ctx.font = '9px monospace';
-            ctx.fillText((entity.name || '').slice(0, 10), pos.x, pos.y + pos.h + 12);
-        });
+        // Update 3D scene with new entity data
+        if (this._initialized && window.Space3D) {
+            window.Space3D.update(entities, layout);
+        }
     }
 };
 
