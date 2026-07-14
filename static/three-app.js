@@ -482,6 +482,60 @@ class CityRenderer3D {
         sprite.scale.set(aspect * 2.5, 2.5, 1);
         return sprite;
     }
+    createWindowTexture(pos, state) {
+        // CanvasTexture with grid of lit/dark window squares as emissive map
+        const cols = Math.max(2, Math.floor(pos.w * 1.5));
+        const rows = Math.max(3, Math.floor(pos.h * 1.5));
+        const cellW = 16;
+        const cellH = 16;
+        const canvas = document.createElement('canvas');
+        canvas.width = cols * cellW;
+        canvas.height = rows * cellH;
+        const ctx = canvas.getContext('2d');
+
+        // Window color per state
+        let litColor, darkColor;
+        switch (state) {
+            case 'healthy':
+            case 'running':
+                litColor = '#fbbf24'; darkColor = '#2a1a00'; break;
+            case 'warning':
+            case 'degraded':
+                litColor = '#f97316'; darkColor = '#2a1000'; break;
+            case 'critical':
+                litColor = '#ef4444'; darkColor = '#2a0000'; break;
+            case 'stopped':
+                litColor = '#111118'; darkColor = '#0a0a10'; break;
+            default:
+                litColor = '#6b7280'; darkColor = '#111118';
+        }
+
+        // Fill background (building wall between windows)
+        ctx.fillStyle = '#1a1a3e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw window grid
+        const padding = 3;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const lit = Math.random() > 0.3; // 70% lit
+                ctx.fillStyle = lit ? litColor : darkColor;
+                ctx.fillRect(
+                    c * cellW + padding,
+                    r * cellH + padding,
+                    cellW - padding * 2,
+                    cellH - padding * 2
+                );
+            }
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.magFilter = THREE.NearestFilter;
+        return { texture, litColor, state };
+    }
+
     
     createBuilding(entity, layout) {
         const pos = layout[entity.id];
@@ -771,20 +825,29 @@ class CityRenderer3D {
     updateBuildingState(mesh, entity) {
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
-        mesh.material.emissive.setHex(color);
         mesh.userData.entity = entity;
 
-        // Rebuild label sprite if state color changed
-        const existingLabel = this.labels.get(entity.id);
-        if (existingLabel) {
-            const newLabel = this._createLabelSprite(entity.name || entity.id, color);
-            newLabel.position.copy(existingLabel.position);
-            newLabel.userData = existingLabel.userData;
-            this.scene.remove(existingLabel);
-            existingLabel.material.map.dispose();
-            existingLabel.material.dispose();
-            this.scene.add(newLabel);
-            this.labels.set(entity.id, newLabel);
+        // Regenerate window texture if state changed
+        const prevData = mesh.userData.windowData;
+        if (!prevData || prevData.state !== state) {
+            const pos = {
+                w: mesh.geometry.parameters.width,
+                h: mesh.geometry.parameters.height,
+                d: mesh.geometry.parameters.depth
+            };
+            const newWindowData = this.createWindowTexture(pos, state);
+            // Dispose old texture
+            if (prevData && prevData.texture) prevData.texture.dispose();
+            mesh.material.emissiveMap = newWindowData.texture;
+            mesh.material.emissive.set(newWindowData.litColor);
+            mesh.material.emissiveIntensity = state === 'stopped' ? 0.05 : 0.6;
+            mesh.material.needsUpdate = true;
+            mesh.userData.windowData = newWindowData;
+        }
+
+        // Update edge color
+        if (mesh.userData.edgesMesh) {
+            mesh.userData.edgesMesh.material.color.setHex(color);
         }
     }
     
@@ -798,6 +861,18 @@ class CityRenderer3D {
         
         // Update controls
         this.controls.update();
+        
+        // Animate rain particles
+        if (this.rainParticles) {
+            const positions = this.rainParticles.geometry.attributes.position.array;
+            for (let i = 0; i < 500; i++) {
+                positions[i * 3 + 1] -= 0.5; // Fall speed
+                if (positions[i * 3 + 1] < 0) {
+                    positions[i * 3 + 1] = 100;
+                }
+            }
+            this.rainParticles.geometry.attributes.position.needsUpdate = true;
+        }
         
         // Animate buildings
         this.buildings.forEach((mesh, id) => {
@@ -858,6 +933,23 @@ class CityRenderer3D {
             this.scene.remove(light);
         });
         this.pointLights = [];
+        
+        // Remove atmosphere
+        if (this.starField) {
+            this.scene.remove(this.starField);
+            this.starField.geometry.dispose();
+            this.starField.material.dispose();
+        }
+        if (this.rainParticles) {
+            this.scene.remove(this.rainParticles);
+            this.rainParticles.geometry.dispose();
+            this.rainParticles.material.dispose();
+        }
+        if (this.moon) {
+            this.scene.remove(this.moon);
+            this.moon.geometry.dispose();
+            this.moon.material.dispose();
+        }
         
         // Remove renderer
         if (this.renderer.domElement.parentNode) {
