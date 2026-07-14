@@ -214,7 +214,7 @@
         modules.push(module);
 
         // Create corridor connecting to hub
-        createCorridor(parentLayout, { x, y, z });
+        createCorridor({ x: 0, y: 0, z: 0 }, { x, y, z });
 
         // Create solar panels
         createSolarPanels(module, angle);
@@ -321,11 +321,12 @@
 
     // Create docking ports (TorusGeometry rings)
     function createDockingPorts(module, entity) {
-        const childServices = (entity.children || []).map(id => {
-            // Look up entities from the module's userData
-            const allEntities = module.userData.allEntities || [];
-            return allEntities.find(e => e.id === id);
-        }).filter(Boolean);
+        const childServices = (entity.children || []).map(id =>
+            entities.find(e => e.id === id)
+        ).filter(Boolean);
+        
+        if (childServices.length === 0) return;
+        
         childServices.forEach((service, i) => {
             const req = service.metrics?.req_per_sec || 0;
             const available = req < 10;

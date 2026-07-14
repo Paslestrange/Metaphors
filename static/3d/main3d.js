@@ -84,6 +84,7 @@
         if (window.ForestMetaphor) metaphorInstances.forest = new window.ForestMetaphor();
         if (window.TrafficLightMetaphor) metaphorInstances.traffic_light = new window.TrafficLightMetaphor();
         if (window.SpaceMetaphor) metaphorInstances.space = new window.SpaceMetaphor();
+        if (window.GardenMetaphor) metaphorInstances.garden = new window.GardenMetaphor();
     }
 
     // ============================================================

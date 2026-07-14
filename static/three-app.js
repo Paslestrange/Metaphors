@@ -14,7 +14,20 @@ class CityRenderer3D {
         this.pointLights = [];
         this.clock = new THREE.Clock();
         this.animating = false;
-        
+        this.rainParticles = null;
+        this.starField = null;
+        this.moon = null;
+        this.moonLight = null;
+
+        // Hover / raycasting
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.hoveredMesh = null;
+        this._lastRaycastTs = 0;
+        this._raycastInterval = 100; // ms debounce
+        this._onMouseMove = null;
+        this._onMouseLeave = null;
+
         // State colors
         this.COLORS = {
             healthy: 0x4ade80,
@@ -38,7 +51,7 @@ class CityRenderer3D {
         // Scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0a0a1a);
-        this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
+        this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.0015);
         
         // Camera - 45 degree angle looking down
         const aspect = this.container.clientWidth / this.container.clientHeight;
@@ -57,6 +70,12 @@ class CityRenderer3D {
         // Lights
         this.setupLights();
         
+        // Atmosphere
+        this.createStarField();
+        this.createRain();
+        this.createMoon();
+        this.createCityHaze();
+        
         // Ground
         this.createGround();
         
@@ -70,12 +89,79 @@ class CityRenderer3D {
         
         // Events
         window.addEventListener('resize', () => this.resize());
-        
+
+        // Hover interaction
+        this._setupHover();
+
         // Start animation
         this.animating = true;
         this.animate();
         
         return this;
+    }
+
+    // ----------------------------------------------------------------
+    // HOVER / RAYCASTING
+    // ----------------------------------------------------------------
+
+    _setupHover() {
+        const canvas = this.renderer.domElement;
+
+        this._onMouseMove = (event) => {
+            const now = performance.now();
+            if (now - this._lastRaycastTs < this._raycastInterval) return;
+            this._lastRaycastTs = now;
+
+            const rect = canvas.getBoundingClientRect();
+            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+
+            // Collect all building meshes (only top-level buildings, not windows/AC)
+            const meshes = [];
+            this.buildings.forEach((mesh) => meshes.push(mesh));
+
+            const intersects = this.raycaster.intersectObjects(meshes, false);
+
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+                if (hitMesh !== this.hoveredMesh) {
+                    this._unhover();
+                    this._hover(hitMesh);
+                }
+                canvas.style.cursor = 'pointer';
+            } else {
+                this._unhover();
+                canvas.style.cursor = 'default';
+            }
+        };
+
+        this._onMouseLeave = () => {
+            this._unhover();
+            canvas.style.cursor = 'default';
+        };
+
+        canvas.addEventListener('mousemove', this._onMouseMove);
+        canvas.addEventListener('mouseleave', this._onMouseLeave);
+    }
+
+    _hover(mesh) {
+        this.hoveredMesh = mesh;
+        // Store original emissive intensity so we can restore it
+        mesh.userData._origEmissiveIntensity = mesh.material.emissiveIntensity;
+        mesh.material.emissiveIntensity = (mesh.userData._origEmissiveIntensity || 0.2) * 1.5;
+    }
+
+    _unhover() {
+        if (!this.hoveredMesh) return;
+        const mesh = this.hoveredMesh;
+        const orig = mesh.userData._origEmissiveIntensity;
+        if (orig !== undefined) {
+            mesh.material.emissiveIntensity = orig;
+            delete mesh.userData._origEmissiveIntensity;
+        }
+        this.hoveredMesh = null;
     }
     
     setupLights() {
@@ -83,9 +169,9 @@ class CityRenderer3D {
         const ambient = new THREE.AmbientLight(0x404040, 0.5);
         this.scene.add(ambient);
         
-        // Directional light (sun/moon)
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(50, 100, 50);
+        // Directional light (moon) — cool blue-white
+        const dirLight = new THREE.DirectionalLight(0xb4c6e7, 0.6);
+        dirLight.position.set(-60, 120, -40);
         dirLight.castShadow = true;
         dirLight.shadow.camera.left = -150;
         dirLight.shadow.camera.right = 150;
@@ -350,6 +436,8 @@ class CityRenderer3D {
         // Remove buildings that no longer exist
         for (const [id, mesh] of this.buildings) {
             if (!currentIds.has(id)) {
+                // If this was the hovered mesh, clear hover state
+                if (this.hoveredMesh === mesh) this._unhover();
                 this.scene.remove(mesh);
                 mesh.geometry.dispose();
                 mesh.material.dispose();
@@ -402,6 +490,9 @@ class CityRenderer3D {
         
         // Animate buildings
         this.buildings.forEach((mesh, id) => {
+            // Skip hover-manipulated meshes for state animations
+            if (mesh === this.hoveredMesh) return;
+
             const entity = mesh.userData.entity;
             const state = entity.state || 'unknown';
             
@@ -437,6 +528,15 @@ class CityRenderer3D {
     
     dispose() {
         this.animating = false;
+
+        // Remove hover listeners
+        if (this._onMouseMove && this.renderer && this.renderer.domElement) {
+            this.renderer.domElement.removeEventListener('mousemove', this._onMouseMove);
+            this.renderer.domElement.removeEventListener('mouseleave', this._onMouseLeave);
+        }
+        this._onMouseMove = null;
+        this._onMouseLeave = null;
+        this.hoveredMesh = null;
         
         // Remove all buildings
         this.buildings.forEach((mesh) => {
