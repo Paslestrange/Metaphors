@@ -10,6 +10,7 @@ class CityRenderer3D {
         this.renderer = null;
         this.controls = null;
         this.buildings = new Map(); // entity.id -> mesh
+        this.labels = new Map(); // entity.id -> label sprite
         this.entities = [];
         this.pointLights = [];
         this.clock = new THREE.Clock();
@@ -89,79 +90,12 @@ class CityRenderer3D {
         
         // Events
         window.addEventListener('resize', () => this.resize());
-
-        // Hover interaction
-        this._setupHover();
-
+        
         // Start animation
         this.animating = true;
         this.animate();
         
         return this;
-    }
-
-    // ----------------------------------------------------------------
-    // HOVER / RAYCASTING
-    // ----------------------------------------------------------------
-
-    _setupHover() {
-        const canvas = this.renderer.domElement;
-
-        this._onMouseMove = (event) => {
-            const now = performance.now();
-            if (now - this._lastRaycastTs < this._raycastInterval) return;
-            this._lastRaycastTs = now;
-
-            const rect = canvas.getBoundingClientRect();
-            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-            this.raycaster.setFromCamera(this.mouse, this.camera);
-
-            // Collect all building meshes (only top-level buildings, not windows/AC)
-            const meshes = [];
-            this.buildings.forEach((mesh) => meshes.push(mesh));
-
-            const intersects = this.raycaster.intersectObjects(meshes, false);
-
-            if (intersects.length > 0) {
-                const hitMesh = intersects[0].object;
-                if (hitMesh !== this.hoveredMesh) {
-                    this._unhover();
-                    this._hover(hitMesh);
-                }
-                canvas.style.cursor = 'pointer';
-            } else {
-                this._unhover();
-                canvas.style.cursor = 'default';
-            }
-        };
-
-        this._onMouseLeave = () => {
-            this._unhover();
-            canvas.style.cursor = 'default';
-        };
-
-        canvas.addEventListener('mousemove', this._onMouseMove);
-        canvas.addEventListener('mouseleave', this._onMouseLeave);
-    }
-
-    _hover(mesh) {
-        this.hoveredMesh = mesh;
-        // Store original emissive intensity so we can restore it
-        mesh.userData._origEmissiveIntensity = mesh.material.emissiveIntensity;
-        mesh.material.emissiveIntensity = (mesh.userData._origEmissiveIntensity || 0.2) * 1.5;
-    }
-
-    _unhover() {
-        if (!this.hoveredMesh) return;
-        const mesh = this.hoveredMesh;
-        const orig = mesh.userData._origEmissiveIntensity;
-        if (orig !== undefined) {
-            mesh.material.emissiveIntensity = orig;
-            delete mesh.userData._origEmissiveIntensity;
-        }
-        this.hoveredMesh = null;
     }
     
     setupLights() {
@@ -182,6 +116,7 @@ class CityRenderer3D {
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
         this.scene.add(dirLight);
+        this.moonLight = dirLight;
         
         // Hemisphere light for ambient variation
         const hemiLight = new THREE.HemisphereLight(0x1a1a3e, 0x0d0d22, 0.3);
@@ -206,39 +141,197 @@ class CityRenderer3D {
     }
     
     createRoads() {
+        // Road material: dark asphalt with slight reflectivity
         const roadMat = new THREE.MeshStandardMaterial({
             color: this.ROAD_COLOR,
-            roughness: 0.8,
-            metalness: 0.1
+            roughness: 0.4,
+            metalness: 0.6,
+            emissive: 0x050510,
+            emissiveIntensity: 0.3
         });
-        
-        // Grid of roads
-        const gridSize = 25;
-        const spacing = 20;
-        
-        for (let i = -gridSize; i <= gridSize; i++) {
-            // Horizontal roads
-            const hRoad = new THREE.Mesh(
-                new THREE.PlaneGeometry(500, 3),
-                roadMat
-            );
-            hRoad.rotation.x = -Math.PI / 2;
-            hRoad.position.y = 0.01;
-            hRoad.position.z = i * spacing;
-            hRoad.receiveShadow = true;
-            this.scene.add(hRoad);
-            
-            // Vertical roads
-            const vRoad = new THREE.Mesh(
-                new THREE.PlaneGeometry(3, 500),
-                roadMat
-            );
-            vRoad.rotation.x = -Math.PI / 2;
-            vRoad.position.y = 0.01;
-            vRoad.position.x = i * spacing;
-            vRoad.receiveShadow = true;
-            this.scene.add(vRoad);
+
+        // Roads connect district boundaries — spacing matches blockSpacing (25)
+        // in computeLayout so roads run between building clusters
+        const roadWidth = 5;
+        const spacing = 25;
+        const halfExtent = 150; // roads span ±150 units
+        const roadPositions = [];
+
+        for (let pos = -halfExtent; pos <= halfExtent; pos += spacing) {
+            roadPositions.push(pos);
         }
+
+        // Horizontal roads (along X axis)
+        roadPositions.forEach(z => {
+            const road = new THREE.Mesh(
+                new THREE.PlaneGeometry(halfExtent * 2, roadWidth),
+                roadMat
+            );
+            road.rotation.x = -Math.PI / 2;
+            road.position.set(0, 0.1, z);
+            road.receiveShadow = true;
+            this.scene.add(road);
+        });
+
+        // Vertical roads (along Z axis)
+        roadPositions.forEach(x => {
+            const road = new THREE.Mesh(
+                new THREE.PlaneGeometry(roadWidth, halfExtent * 2),
+                roadMat
+            );
+            road.rotation.x = -Math.PI / 2;
+            road.position.set(x, 0.1, 0);
+            road.receiveShadow = true;
+            this.scene.add(road);
+        });
+
+        // Lane markings — dashed white lines down center of each road
+        this.createLaneMarkings(roadPositions, halfExtent);
+
+        // Crosswalks at intersections
+        this.createCrosswalks(roadPositions, roadWidth);
+
+        // Streetlights along roads
+        this.createStreetlights(roadPositions, halfExtent);
+    }
+
+    createLaneMarkings(roadPositions, halfExtent) {
+        const dashLength = 3;
+        const gapLength = 3;
+        const lineColor = 0xffffff;
+        const lineMat = new THREE.LineDashedMaterial({
+            color: lineColor,
+            dashSize: dashLength,
+            gapSize: gapLength,
+            linewidth: 1
+        });
+
+        // Center dashed line for horizontal roads
+        roadPositions.forEach(z => {
+            const points = [
+                new THREE.Vector3(-halfExtent, 0.15, z),
+                new THREE.Vector3(halfExtent, 0.15, z)
+            ];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, lineMat);
+            line.computeLineDistances();
+            this.scene.add(line);
+        });
+
+        // Center dashed line for vertical roads
+        roadPositions.forEach(x => {
+            const points = [
+                new THREE.Vector3(x, 0.15, -halfExtent),
+                new THREE.Vector3(x, 0.15, halfExtent)
+            ];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, lineMat);
+            line.computeLineDistances();
+            this.scene.add(line);
+        });
+    }
+
+    createCrosswalks(roadPositions, roadWidth) {
+        const stripeMat = new THREE.MeshBasicMaterial({
+            color: 0xcccccc,
+            transparent: true,
+            opacity: 0.7
+        });
+        const stripeWidth = 0.4;
+        const stripeGap = 0.8;
+        const crosswalkLength = roadWidth;
+        const numStripes = Math.floor(crosswalkLength / (stripeWidth + stripeGap));
+
+        // At each intersection, add crosswalk stripes on all 4 approaches
+        roadPositions.forEach(roadZ => {
+            roadPositions.forEach(roadX => {
+                // Crosswalk on horizontal road (east and west approaches)
+                for (let side = -1; side <= 1; side += 2) {
+                    for (let s = 0; s < numStripes; s++) {
+                        const stripe = new THREE.Mesh(
+                            new THREE.PlaneGeometry(stripeWidth, 0.6),
+                            stripeMat
+                        );
+                        stripe.rotation.x = -Math.PI / 2;
+                        stripe.position.set(
+                            roadX + side * (roadWidth * 0.7 + s * (stripeWidth + stripeGap)),
+                            0.12,
+                            roadZ
+                        );
+                        this.scene.add(stripe);
+                    }
+                }
+                // Crosswalk on vertical road (north and south approaches)
+                for (let side = -1; side <= 1; side += 2) {
+                    for (let s = 0; s < numStripes; s++) {
+                        const stripe = new THREE.Mesh(
+                            new THREE.PlaneGeometry(0.6, stripeWidth),
+                            stripeMat
+                        );
+                        stripe.rotation.x = -Math.PI / 2;
+                        stripe.position.set(
+                            roadX,
+                            0.12,
+                            roadZ + side * (roadWidth * 0.7 + s * (stripeWidth + stripeGap))
+                        );
+                        this.scene.add(stripe);
+                    }
+                }
+            });
+        });
+    }
+
+    createStreetlights(roadPositions, halfExtent) {
+        const poleMat = new THREE.MeshStandardMaterial({
+            color: 0x333355,
+            metalness: 0.8,
+            roughness: 0.3
+        });
+        const lampMat = new THREE.MeshBasicMaterial({
+            color: 0xffcc66,
+            transparent: true,
+            opacity: 0.9
+        });
+        const lightColor = 0xffaa44; // warm yellow
+        const lightIntensity = 0.3;
+        const lightDistance = 15;
+
+        // Place streetlights every other road segment to limit PointLight count
+        const lightSpacing = 50; // every 50 units along each road
+        const poleHeight = 4;
+        const poleRadius = 0.1;
+        let lightCount = 0;
+        const maxLights = 30; // limit for performance
+
+        roadPositions.forEach(pos => {
+            // Along horizontal roads
+            for (let x = -halfExtent + 10; x <= halfExtent - 10; x += lightSpacing) {
+                if (lightCount >= maxLights) break;
+                for (let side = -1; side <= 1; side += 2) {
+                    if (lightCount >= maxLights) break;
+                    // Pole
+                    const poleGeo = new THREE.CylinderGeometry(poleRadius, poleRadius, poleHeight, 6);
+                    const pole = new THREE.Mesh(poleGeo, poleMat);
+                    pole.position.set(x, poleHeight / 2, pos + side * 3.5);
+                    pole.castShadow = true;
+                    this.scene.add(pole);
+
+                    // Lamp head
+                    const lampGeo = new THREE.SphereGeometry(0.2, 6, 6);
+                    const lamp = new THREE.Mesh(lampGeo, lampMat);
+                    lamp.position.set(x, poleHeight + 0.1, pos + side * 3.5);
+                    this.scene.add(lamp);
+
+                    // Point light (only some lamps to limit count)
+                    if (lightCount < maxLights) {
+                        const light = new THREE.PointLight(lightColor, lightIntensity, lightDistance);
+                        light.position.set(x, poleHeight, pos + side * 3.5);
+                        this.scene.add(light);
+                        lightCount++;
+                    }
+                }
+            }
+        });
     }
     
     computeLayout(entities) {
@@ -303,6 +396,89 @@ class CityRenderer3D {
         
         return layout;
     }
+
+    // ── Label sprites ──────────────────────────────────────────────
+    // Creates a Sprite with text on a dark rounded-rect background.
+    // Text is rendered in monospace bold at 28px internal resolution,
+    // with a neon glow (shadowBlur) in the entity's state color.
+    // Sprites always face the camera automatically in Three.js.
+    _createLabelSprite(text, colorHex) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const fontSize = 28;
+        const padding = 14;
+
+        // Measure text
+        ctx.font = `bold ${fontSize}px monospace`;
+        const metrics = ctx.measureText(text);
+        const textWidth = metrics.width;
+
+        canvas.width = Math.ceil(textWidth + padding * 2);
+        canvas.height = Math.ceil(fontSize * 1.5 + padding * 2);
+
+        // Re-set font after canvas resize
+        ctx.font = `bold ${fontSize}px monospace`;
+        ctx.textBaseline = 'top';
+
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // Dark rounded background
+        const r = 6;
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(w - r, 0);
+        ctx.quadraticCurveTo(w, 0, w, r);
+        ctx.lineTo(w, h - r);
+        ctx.quadraticCurveTo(w, h, w - r, h);
+        ctx.lineTo(r, h);
+        ctx.quadraticCurveTo(0, h, 0, h - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(10, 10, 26, 0.80)';
+        ctx.fill();
+
+        // Border in state color
+        const colorStr = '#' + new THREE.Color(colorHex).getHexString();
+        ctx.strokeStyle = colorStr;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Glow pass — draw text with shadowBlur for neon bloom
+        ctx.shadowColor = colorStr;
+        ctx.shadowBlur = 14;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = colorStr;
+        ctx.fillText(text, padding, padding);
+        // Second pass for stronger glow
+        ctx.fillText(text, padding, padding);
+
+        // Crisp white text on top
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(text, padding, padding);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.needsUpdate = true;
+
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: true,
+            depthWrite: false,
+            sizeAttenuation: true
+        });
+
+        const sprite = new THREE.Sprite(material);
+        // Scale sprite proportionally to canvas aspect — base height ~2.5 world units
+        const aspect = canvas.width / canvas.height;
+        sprite.scale.set(aspect * 2.5, 2.5, 1);
+        return sprite;
+    }
     
     createBuilding(entity, layout) {
         const pos = layout[entity.id];
@@ -328,6 +504,16 @@ class CityRenderer3D {
         building.userData = { entity: entity };
         
         this.scene.add(building);
+
+        // ── Label sprite above rooftop (service-level only) ──
+        if (entity.type === 'service') {
+            const label = this._createLabelSprite(entity.name || entity.id, color);
+            const labelY = pos.h + 2.5; // float above rooftop
+            label.position.set(pos.x, labelY, pos.z);
+            label.userData = { entityId: entity.id, isLabel: true };
+            this.scene.add(label);
+            this.labels.set(entity.id, label);
+        }
         
         // Windows
         this.addWindows(building, pos, color);
@@ -433,15 +619,22 @@ class CityRenderer3D {
         const layout = this.computeLayout(entities);
         const currentIds = new Set(entities.map(e => e.id));
         
-        // Remove buildings that no longer exist
+        // Remove buildings + labels that no longer exist
         for (const [id, mesh] of this.buildings) {
             if (!currentIds.has(id)) {
-                // If this was the hovered mesh, clear hover state
-                if (this.hoveredMesh === mesh) this._unhover();
                 this.scene.remove(mesh);
                 mesh.geometry.dispose();
                 mesh.material.dispose();
                 this.buildings.delete(id);
+
+                // Remove label if exists
+                const label = this.labels.get(id);
+                if (label) {
+                    this.scene.remove(label);
+                    label.material.map.dispose();
+                    label.material.dispose();
+                    this.labels.delete(id);
+                }
                 
                 // Remove point light if exists
                 const lightIdx = this.pointLights.findIndex(l => l.entityId === id);
@@ -475,6 +668,19 @@ class CityRenderer3D {
         const color = this.COLORS[state] || this.COLORS.unknown;
         mesh.material.emissive.setHex(color);
         mesh.userData.entity = entity;
+
+        // Rebuild label sprite if state color changed
+        const existingLabel = this.labels.get(entity.id);
+        if (existingLabel) {
+            const newLabel = this._createLabelSprite(entity.name || entity.id, color);
+            newLabel.position.copy(existingLabel.position);
+            newLabel.userData = existingLabel.userData;
+            this.scene.remove(existingLabel);
+            existingLabel.material.map.dispose();
+            existingLabel.material.dispose();
+            this.scene.add(newLabel);
+            this.labels.set(entity.id, newLabel);
+        }
     }
     
     animate() {
@@ -490,9 +696,6 @@ class CityRenderer3D {
         
         // Animate buildings
         this.buildings.forEach((mesh, id) => {
-            // Skip hover-manipulated meshes for state animations
-            if (mesh === this.hoveredMesh) return;
-
             const entity = mesh.userData.entity;
             const state = entity.state || 'unknown';
             
@@ -528,15 +731,6 @@ class CityRenderer3D {
     
     dispose() {
         this.animating = false;
-
-        // Remove hover listeners
-        if (this._onMouseMove && this.renderer && this.renderer.domElement) {
-            this.renderer.domElement.removeEventListener('mousemove', this._onMouseMove);
-            this.renderer.domElement.removeEventListener('mouseleave', this._onMouseLeave);
-        }
-        this._onMouseMove = null;
-        this._onMouseLeave = null;
-        this.hoveredMesh = null;
         
         // Remove all buildings
         this.buildings.forEach((mesh) => {
@@ -545,6 +739,14 @@ class CityRenderer3D {
             mesh.material.dispose();
         });
         this.buildings.clear();
+
+        // Remove all labels
+        this.labels.forEach((sprite) => {
+            this.scene.remove(sprite);
+            sprite.material.map.dispose();
+            sprite.material.dispose();
+        });
+        this.labels.clear();
         
         // Remove point lights
         this.pointLights.forEach(({ light }) => {
