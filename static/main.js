@@ -1571,17 +1571,38 @@ metaphorRenderers.space = {
     _container: null,
     
     computeLayout(entities, W, H) {
-        // Use Python backend layout (already computed)
-        // 3D renderer will use this layout data
         return {};
     },
 
     render(ctx, entities, layout, W, H, COLORS) {
+        // Clear the 2D canvas so the city doesn't show through
+        ctx.clearRect(0, 0, W, H);
+        
+        // Ensure 2D canvas is hidden behind the 3D view
+        const canvas2d = document.getElementById('canvas');
+        if (canvas2d) canvas2d.style.display = 'none';
+        
         // Initialize 3D renderer on first call
         if (!this._initialized) {
             const container = document.getElementById('space3d-container');
             if (container && window.Space3D) {
                 this._container = container;
+                // Make container fill the viewport
+                container.style.position = 'absolute';
+                container.style.top = '0';
+                container.style.left = '0';
+                container.style.width = '100%';
+                container.style.height = '100%';
+                container.style.zIndex = '5';
+                container.style.display = 'block';
+                
+                // Make app container allow absolute children
+                const app = document.getElementById('app');
+                if (app) {
+                    app.style.position = 'relative';
+                    app.style.overflow = 'hidden';
+                }
+                
                 window.Space3D.init(container);
                 this._initialized = true;
             }
