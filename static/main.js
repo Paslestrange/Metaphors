@@ -267,6 +267,26 @@ function _cityDrawBuilding(ctx, entity, pos, now) {
     const bx = pos.x, by = pos.y, bw = pos.w, bh = pos.h;
     const seed = _cityHash(entity.id || 'x') % 10000;
 
+    // Roof cornice (ledge at top)
+    if (bw > 14) {
+        ctx.fillStyle = '#222244';
+        ctx.fillRect(bx - 1, by - 2, bw + 2, 3);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#3a3a5e';
+        ctx.fillRect(bx - 1, by - 3, bw + 2, 1);
+        ctx.globalAlpha = 1.0;
+    }
+
+    // Roof cornice (ledge at top)
+    if (bw > 14) {
+        ctx.fillStyle = '#222244';
+        ctx.fillRect(bx - 1, by - 2, bw + 2, 3);
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#3a3a5e';
+        ctx.fillRect(bx - 1, by - 3, bw + 2, 1);
+        ctx.globalAlpha = 1.0;
+    }
+
     // Building body
     ctx.fillStyle = CITY_WALL;
     ctx.fillRect(bx, by, bw, bh);
@@ -358,20 +378,40 @@ function _cityDrawBuilding(ctx, entity, pos, now) {
         }
     }
 
-    // Entrance
+    // Entrance (awning, double doors, handles, light spill)
     if (bh > 35 && bw > 18) {
-        const doorW = Math.max(4, bw * 0.15);
-        const doorH = Math.max(5, Math.min(10, bh * 0.1));
+        const doorW = Math.max(6, bw * 0.2);
+        const doorH = Math.max(6, Math.min(12, bh * 0.12));
         const doorX = bx + (bw - doorW) / 2;
         const doorY = by + bh - doorH;
+        // Door frame
+        ctx.fillStyle = '#1a1a30';
+        ctx.fillRect(doorX - 1, doorY - 1, doorW + 2, doorH + 1);
+        // Double doors
+        const halfW = doorW / 2 - 0.5;
         ctx.fillStyle = '#0a0a18';
-        ctx.fillRect(doorX, doorY, doorW, doorH);
-        ctx.globalAlpha = 0.5;
+        ctx.fillRect(doorX, doorY, halfW, doorH);
+        ctx.fillRect(doorX + halfW + 1, doorY, halfW, doorH);
+        // Door handles
         ctx.fillStyle = color;
-        ctx.fillRect(doorX - 2, doorY - 2, doorW + 4, 2);
-        ctx.globalAlpha = 0.08;
+        ctx.globalAlpha = 0.7;
+        ctx.fillRect(doorX + halfW - 1.5, doorY + doorH * 0.55, 1, 1);
+        ctx.fillRect(doorX + halfW + 1.5, doorY + doorH * 0.55, 1, 1);
+        ctx.globalAlpha = 1.0;
+        // Awning
+        const awningW = doorW + 8;
+        const awningX = doorX - 4;
+        const awningY = doorY - 4;
+        ctx.globalAlpha = 0.4;
         ctx.fillStyle = color;
-        ctx.fillRect(doorX - 2, by + bh - 1, doorW + 4, 3);
+        ctx.fillRect(awningX, awningY, awningW, 2);
+        ctx.globalAlpha = 0.25;
+        ctx.fillRect(awningX + 1, awningY + 2, awningW - 2, 1);
+        ctx.globalAlpha = 1.0;
+        // Light spill on ground
+        ctx.globalAlpha = 0.1;
+        ctx.fillStyle = color;
+        ctx.fillRect(doorX - 3, by + bh - 1, doorW + 6, 4);
         ctx.globalAlpha = 1.0;
     }
 
@@ -515,31 +555,46 @@ metaphorRenderers.city = {
         if (!roots.length) return layout;
 
         const districtW = W / Math.max(roots.length, 1);
+        const groundY = H - 50;
+        
         roots.forEach((root, di) => {
             const dx = di * districtW;
             layout[root.id] = { x: dx, y: 0, w: districtW, h: H };
 
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
             if (!children.length) return;
-            const blockH = (H - 60) / Math.max(children.length, 1);
+            
+            const blockW = districtW - 20;
+            const blockSpacing = 30;
+            const startX = dx + 10;
+            
             children.forEach((child, bi) => {
-                const by_ = bi * blockH;
-                layout[child.id] = { x: dx + 10, y: by_ + 30, w: districtW - 20, h: blockH - 10 };
+                const cx = startX + bi * (blockW + blockSpacing);
+                if (cx > W - 50) return;
+                
+                const blockY = groundY - 140;
+                const blockH = 140;
+                layout[child.id] = { x: cx, y: blockY, w: blockW, h: blockH };
 
                 const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
                 if (!grandchildren.length) return;
-                const totalGW = districtW - 40;
-                const slotW = totalGW / Math.max(grandchildren.length, 1);
+                
+                const buildingsPerRow = Math.min(4, grandchildren.length);
+                const buildingSlotW = blockW / buildingsPerRow;
+                
                 grandchildren.forEach((gc, gi) => {
                     const metrics = gc.metrics || {};
                     const cpu = Math.max(0, Math.min(100, metrics.cpu || 50));
                     const mem = Math.max(0, Math.min(100, metrics.mem || 50));
-                    let bw2 = Math.max(12, 12 + (80 - 12) * (mem / 100));
-                    bw2 = Math.min(bw2, slotW - 4);
-                    const maxBH2 = blockH - 50;
-                    const bh2 = Math.max(15, maxBH2 * (cpu / 100));
-                    const bx2 = dx + 20 + gi * slotW + (slotW - bw2) / 2;
-                    const by2 = by_ + 30 + (maxBH2 - bh2);
+                    
+                    const bw2 = Math.max(20, Math.min(50, 20 + (mem / 100) * 30));
+                    const bh2 = Math.max(30, Math.min(120, 30 + (cpu / 100) * 90));
+                    
+                    const col = gi % buildingsPerRow;
+                    const row = Math.floor(gi / buildingsPerRow);
+                    const bx2 = cx + col * buildingSlotW + (buildingSlotW - bw2) / 2;
+                    const by2 = groundY - bh2 - 5 - row * 15;
+                    
                     layout[gc.id] = { x: bx2, y: by2, w: bw2, h: bh2 };
                 });
             });
@@ -671,7 +726,627 @@ metaphorRenderers.solar = {
     }
 };
 
-// Forest metaphor
+// Forest metaphor — Full Visual Overhaul (6-layer depth)
+// Mapping: Cluster=Grove, Node=Tree, Service=Canopy, Container=Leaf cluster
+const _forestState = {
+    initialized: false,
+    lastW: 0,
+    lastH: 0,
+    startTime: performance.now() / 1000,
+    stars: [],
+    distantTrees: [],
+    grassTufts: [],
+    rocks: [],
+    undergrowth: [],
+    fireflies: [],
+    petals: [],
+    waterParticles: [],
+    sunX: 0,
+    sunY: 0,
+};
+
+const FOREST_SKY_TOP = '#87ceeb';
+const FOREST_SKY_BOTTOM = '#1a0a2e';
+const FOREST_SOIL = '#3d2817';
+const FOREST_GRASS = '#228b22';
+const FOREST_BARK = '#5d3a1a';
+const FOREST_LEAF_HEALTHY = '#4ade80';
+const FOREST_LEAF_WARN = '#fbbf24';
+const FOREST_LEAF_CRIT = '#ef4444';
+const FOREST_LEAF_DEAD = '#8b4513';
+const FOREST_WATER = '#4488ff';
+
+const FOREST_STATE_COLORS = {
+    healthy: '#4ade80', running: '#60a5fa', warning: '#fbbf24',
+    critical: '#ef4444', stopped: '#374151', idle: '#94a3b8',
+    degraded: '#f97316', pending: '#a78bfa', scaling: '#06b6d4', unknown: '#6b7280',
+};
+
+function _forestHash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+    return h;
+}
+
+function _forestInitScene(W, H) {
+    const rng = (seed) => {
+        let s = seed;
+        return () => { s = (s * 16807 + 0) % 2147483647; return s / 2147483647; };
+    };
+
+    // Stars
+    const r1 = rng(12345);
+    _forestState.stars = [];
+    for (let i = 0; i < 60; i++) {
+        _forestState.stars.push({ x: r1() * W, y: r1() * H * 0.4, brightness: 0.2 + r1() * 0.8, size: 0.5 + r1() * 1.5 });
+    }
+
+    // Distant tree silhouettes (horizon)
+    const r2 = rng(54321);
+    _forestState.distantTrees = [];
+    const horizonY = H * 0.45;
+    for (let i = 0; i < 25; i++) {
+        _forestState.distantTrees.push({
+            x: r2() * W,
+            y: horizonY - 10 + r2() * 20,
+            w: 15 + r2() * 30,
+            h: 30 + r2() * 60,
+            shade: r2(),
+        });
+    }
+
+    // Grass tufts on ground
+    const r3 = rng(11111);
+    _forestState.grassTufts = [];
+    const groundY = H * 0.75;
+    for (let i = 0; i < 80; i++) {
+        _forestState.grassTufts.push({
+            x: r3() * W,
+            y: groundY + r3() * (H - groundY),
+            blades: 2 + Math.floor(r3() * 4),
+            height: 4 + r3() * 10,
+            phase: r3() * Math.PI * 2,
+        });
+    }
+
+    // Rocks
+    const r4 = rng(22222);
+    _forestState.rocks = [];
+    for (let i = 0; i < 12; i++) {
+        _forestState.rocks.push({
+            x: r4() * W,
+            y: groundY + 10 + r4() * (H - groundY - 20),
+            r: 2 + r4() * 5,
+            shade: 0.3 + r4() * 0.4,
+        });
+    }
+
+    // Undergrowth (bushes, ferns, mushrooms)
+    const r5 = rng(33333);
+    _forestState.undergrowth = [];
+    for (let i = 0; i < 20; i++) {
+        const kind = r5() < 0.5 ? 'bush' : (r5() < 0.7 ? 'fern' : 'mushroom');
+        _forestState.undergrowth.push({
+            x: r5() * W,
+            y: groundY + 5 + r5() * (H - groundY - 15),
+            kind: kind,
+            size: 6 + r5() * 12,
+            phase: r5() * Math.PI * 2,
+        });
+    }
+
+    // Fireflies
+    const r6 = rng(44444);
+    _forestState.fireflies = [];
+    for (let i = 0; i < 20; i++) {
+        _forestState.fireflies.push({
+            x: r6() * W,
+            y: H * 0.3 + r6() * H * 0.5,
+            vx: (r6() - 0.5) * 15,
+            vy: (r6() - 0.5) * 10,
+            phase: r6() * Math.PI * 2,
+            brightness: 0.3 + r6() * 0.7,
+        });
+    }
+
+    // Falling petals
+    const r7 = rng(55555);
+    _forestState.petals = [];
+    for (let i = 0; i < 30; i++) {
+        _forestState.petals.push({
+            x: r7() * W,
+            y: r7() * H * 0.6,
+            vy: 8 + r7() * 20,
+            vx: (r7() - 0.5) * 15,
+            size: 1.5 + r7() * 3,
+            rot: r7() * Math.PI * 2,
+            rotSpeed: (r7() - 0.5) * 2,
+            color: r7() < 0.5 ? '#ff9ecd' : '#ffc8e0',
+        });
+    }
+
+    // Water particles (for stream)
+    const r8 = rng(66666);
+    _forestState.waterParticles = [];
+    for (let i = 0; i < 15; i++) {
+        _forestState.waterParticles.push({
+            offset: r8(),
+            speed: 0.02 + r8() * 0.04,
+        });
+    }
+
+    // Sun position
+    _forestState.sunX = W * 0.75;
+    _forestState.sunY = H * 0.12;
+
+    _forestState.initialized = true;
+    _forestState.lastW = W;
+    _forestState.lastH = H;
+}
+
+function _forestDrawSky(ctx, W, H, now) {
+    // Gradient sky — time-based cycle
+    const cycle = (Math.sin(now * 0.05) + 1) / 2; // 0..1
+    const grad = ctx.createLinearGradient(0, 0, 0, H * 0.75);
+    // Interpolate between day and dusk
+    const topR = Math.round(135 - cycle * 109);
+    const topG = Math.round(206 - cycle * 196);
+    const topB = Math.round(235 - cycle * 189);
+    const botR = Math.round(26 + cycle * 60);
+    const botG = Math.round(10 + cycle * 40);
+    const botB = Math.round(46 + cycle * 80);
+    grad.addColorStop(0, `rgb(${topR},${topG},${topB})`);
+    grad.addColorStop(1, `rgb(${botR},${botG},${botB})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars (visible more during dusk)
+    const starAlpha = 0.1 + cycle * 0.6;
+    _forestState.stars.forEach(star => {
+        const twinkle = 0.5 + 0.5 * Math.sin(now * 2 + star.x);
+        ctx.fillStyle = `rgba(255,255,240,${starAlpha * star.brightness * twinkle})`;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Sun/moon
+    const sunY = _forestState.sunY + cycle * 20;
+    const sunGrad = ctx.createRadialGradient(_forestState.sunX, sunY, 0, _forestState.sunX, sunY, 40);
+    const sunAlpha = 0.9 - cycle * 0.5;
+    sunGrad.addColorStop(0, `rgba(255,220,100,${sunAlpha})`);
+    sunGrad.addColorStop(0.3, `rgba(255,180,60,${sunAlpha * 0.6})`);
+    sunGrad.addColorStop(1, 'rgba(255,180,60,0)');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(_forestState.sunX, sunY, 40, 0, Math.PI * 2);
+    ctx.fill();
+    // Sun core
+    ctx.fillStyle = `rgba(255,240,180,${sunAlpha})`;
+    ctx.beginPath();
+    ctx.arc(_forestState.sunX, sunY, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Light rays from sun
+    ctx.save();
+    ctx.globalAlpha = 0.05 + cycle * 0.03;
+    for (let i = 0; i < 5; i++) {
+        const angle = -0.5 + i * 0.25 + Math.sin(now * 0.3 + i) * 0.05;
+        const rayLen = H * 0.7;
+        ctx.strokeStyle = 'rgba(255,230,150,0.15)';
+        ctx.lineWidth = 8 + i * 3;
+        ctx.beginPath();
+        ctx.moveTo(_forestState.sunX, sunY);
+        ctx.lineTo(_forestState.sunX + Math.cos(angle + 1) * rayLen, sunY + Math.sin(angle + 1) * rayLen);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function _forestDrawDistantTrees(ctx, W, H) {
+    const horizonY = H * 0.45;
+    // Distant hill/mist
+    const mistGrad = ctx.createLinearGradient(0, horizonY - 30, 0, horizonY + 40);
+    mistGrad.addColorStop(0, 'rgba(20,60,20,0.3)');
+    mistGrad.addColorStop(1, 'rgba(20,60,20,0)');
+    ctx.fillStyle = mistGrad;
+    ctx.fillRect(0, horizonY - 30, W, 70);
+
+    // Silhouette trees
+    _forestState.distantTrees.forEach(tree => {
+        const darkGreen = `rgba(${15 + tree.shade * 20},${40 + tree.shade * 20},${15 + tree.shade * 10},0.8)`;
+        // Trunk
+        ctx.fillStyle = `rgba(30,20,10,0.6)`;
+        ctx.fillRect(tree.x - 2, tree.y, 4, tree.h * 0.4);
+        // Canopy — triangular
+        ctx.fillStyle = darkGreen;
+        ctx.beginPath();
+        ctx.moveTo(tree.x, tree.y - tree.h * 0.3);
+        ctx.lineTo(tree.x - tree.w / 2, tree.y + tree.h * 0.3);
+        ctx.lineTo(tree.x + tree.w / 2, tree.y + tree.h * 0.3);
+        ctx.closePath();
+        ctx.fill();
+    });
+}
+
+function _forestDrawGround(ctx, W, H, now) {
+    const groundY = H * 0.75;
+
+    // Ground gradient — soil
+    const soilGrad = ctx.createLinearGradient(0, groundY, 0, H);
+    soilGrad.addColorStop(0, '#3d6b2e'); // grass top
+    soilGrad.addColorStop(0.05, '#2d5a1e');
+    soilGrad.addColorStop(0.15, '#3d2817'); // soil
+    soilGrad.addColorStop(1, '#2a1a0f');
+    ctx.fillStyle = soilGrad;
+    ctx.fillRect(0, groundY, W, H - groundY);
+
+    // Soil texture — small dots
+    const seed = 777;
+    let s = seed;
+    const nextR = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    ctx.fillStyle = 'rgba(80,50,30,0.4)';
+    for (let i = 0; i < 100; i++) {
+        const px = nextR() * W;
+        const py = groundY + 15 + nextR() * (H - groundY - 20);
+        const pr = 1 + nextR() * 2;
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Pebbles
+    _forestState.rocks.forEach(rock => {
+        ctx.fillStyle = `rgba(${Math.round(100 * rock.shade)},${Math.round(90 * rock.shade)},${Math.round(80 * rock.shade)},0.7)`;
+        ctx.beginPath();
+        ctx.ellipse(rock.x, rock.y, rock.r, rock.r * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(40,30,20,0.3)';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+    });
+
+    // Grass tufts
+    _forestState.grassTufts.forEach(tuft => {
+        const sway = Math.sin(now * 1.5 + tuft.phase) * 2;
+        ctx.strokeStyle = '#2d8a2d';
+        ctx.lineWidth = 1.2;
+        for (let b = 0; b < tuft.blades; b++) {
+            const bx = tuft.x + (b - tuft.blades / 2) * 2;
+            const swayB = sway * (b % 2 === 0 ? 1 : -0.5);
+            ctx.beginPath();
+            ctx.moveTo(bx, tuft.y);
+            ctx.quadraticCurveTo(bx + swayB, tuft.y - tuft.height * 0.6, bx + swayB * 1.5, tuft.y - tuft.height);
+            ctx.stroke();
+        }
+    });
+
+    // Path/water stream
+    const streamY = groundY + (H - groundY) * 0.4;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = FOREST_WATER;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(0, streamY);
+    for (let x = 0; x <= W; x += 20) {
+        const sy = streamY + Math.sin(x * 0.02 + now * 0.8) * 3;
+        ctx.lineTo(x, sy);
+    }
+    ctx.stroke();
+    // Stream highlight
+    ctx.strokeStyle = 'rgba(150,200,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, streamY - 1);
+    for (let x = 0; x <= W; x += 20) {
+        const sy = streamY - 1 + Math.sin(x * 0.03 + now * 1.2) * 2;
+        ctx.lineTo(x, sy);
+    }
+    ctx.stroke();
+    // Water particles
+    _forestState.waterParticles.forEach(wp => {
+        const px = ((wp.offset + now * wp.speed) % 1) * W;
+        const py = streamY + Math.sin(px * 0.02 + now * 0.8) * 3;
+        ctx.fillStyle = 'rgba(200,230,255,0.6)';
+        ctx.beginPath();
+        ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
+
+function _forestDrawTree(ctx, entity, pos, now, layout) {
+    const cx = pos.x + pos.w / 2;
+    const baseY = pos.y + pos.h; // bottom of trunk area
+    const trunkTop = pos.y;
+    const trunkW = Math.max(8, pos.w * 0.35);
+    const h = baseY - trunkTop;
+    const seed = Math.abs(_forestHash(entity.id || ''));
+    const rng = (() => { let s = seed; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+
+    // Shadow on ground
+    const shadowOffset = 15 + (cx / (pos.w || 1)) * 5;
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(cx + shadowOffset, baseY + 5, trunkW * 2, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Trunk with bark texture
+    const trunkX = cx - trunkW / 2;
+    ctx.fillStyle = FOREST_BARK;
+    ctx.fillRect(trunkX, trunkTop + h * 0.15, trunkW, h * 0.85);
+
+    // Bark texture — vertical lines with color variation
+    ctx.save();
+    for (let i = 0; i < 8; i++) {
+        const lx = trunkX + rng() * trunkW;
+        const ly = trunkTop + h * 0.15 + rng() * h * 0.1;
+        const lh = h * 0.5 + rng() * h * 0.3;
+        const shade = Math.round(60 + rng() * 40);
+        ctx.strokeStyle = `rgba(${shade},${Math.round(shade * 0.6)},${Math.round(shade * 0.3)},0.5)`;
+        ctx.lineWidth = 0.8 + rng() * 1.2;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx + (rng() - 0.5) * 3, ly + lh);
+        ctx.stroke();
+    }
+    // Bark knots
+    for (let i = 0; i < 2; i++) {
+        const kx = trunkX + 2 + rng() * (trunkW - 4);
+        const ky = trunkTop + h * 0.3 + rng() * h * 0.5;
+        ctx.fillStyle = 'rgba(40,25,10,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(kx, ky, 2, 3, rng() * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+
+    // Trunk highlight (sun-facing side)
+    const highlightX = cx > pos.w ? trunkX + trunkW - 2 : trunkX;
+    ctx.fillStyle = 'rgba(120,80,40,0.3)';
+    ctx.fillRect(highlightX, trunkTop + h * 0.2, 2, h * 0.6);
+
+    // Root flare
+    ctx.fillStyle = '#4a2a10';
+    ctx.beginPath();
+    ctx.moveTo(trunkX - 4, baseY);
+    ctx.quadraticCurveTo(trunkX, baseY - 8, trunkX + trunkW * 0.3, baseY - 3);
+    ctx.lineTo(trunkX + trunkW * 0.7, baseY - 3);
+    ctx.quadraticCurveTo(trunkX + trunkW, baseY - 8, trunkX + trunkW + 4, baseY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Branches connecting trunk to canopy
+    const children = entity.children || [];
+    const stateColor = FOREST_STATE_COLORS[entity.state] || FOREST_STATE_COLORS.unknown;
+    const cpu = (entity.metrics || {}).cpu || 50;
+    const numBranches = Math.max(2, Math.min(5, Math.ceil(children.length * 0.5) + 1));
+
+    for (let b = 0; b < numBranches; b++) {
+        const angle = -Math.PI / 2 + (b - (numBranches - 1) / 2) * 0.6;
+        const branchLen = h * 0.3 + rng() * h * 0.15;
+        const bx1 = cx;
+        const by1 = trunkTop + h * 0.15 + rng() * h * 0.1;
+        const bx2 = cx + Math.cos(angle) * branchLen;
+        const by2 = by1 + Math.sin(angle) * branchLen;
+        const sway = Math.sin(now * 0.8 + b) * 1.5;
+
+        ctx.strokeStyle = FOREST_BARK;
+        ctx.lineWidth = 2 + rng() * 2;
+        ctx.beginPath();
+        ctx.moveTo(bx1, by1);
+        ctx.quadraticCurveTo(
+            (bx1 + bx2) / 2 + sway,
+            (by1 + by2) / 2 - 5,
+            bx2 + sway, by2
+        );
+        ctx.stroke();
+    }
+}
+
+function _forestDrawCanopy(ctx, entity, pos, now, layout) {
+    const cx = pos.x + pos.w / 2;
+    const cy = pos.y + pos.h / 2;
+    const state = entity.state || 'unknown';
+    const cpu = (entity.metrics || {}).cpu || 50;
+    const baseR = Math.max(8, pos.w / 2);
+    const seed = Math.abs(_forestHash(entity.id || ''));
+    const rng = (() => { let s = seed; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+
+    // Leaf cluster color based on state
+    let leafColor, leafDark, leafLight;
+    if (state === 'healthy' || state === 'running') {
+        leafColor = '#4ade80'; leafDark = '#228b22'; leafLight = '#6aff90';
+    } else if (state === 'warning' || state === 'idle') {
+        leafColor = '#fbbf24'; leafDark = '#b8860b'; leafLight = '#ffe066';
+    } else if (state === 'critical' || state === 'degraded') {
+        leafColor = '#ef4444'; leafDark = '#8b0000'; leafLight = '#ff7777';
+    } else if (state === 'stopped') {
+        leafColor = '#8b4513'; leafDark = '#5c2d0e'; leafLight = '#a0522d';
+    } else {
+        leafColor = FOREST_STATE_COLORS[state] || '#6b7280';
+        leafDark = '#3a3a3a'; leafLight = '#9a9a9a';
+    }
+
+    // Draw individual leaf clusters (not a solid blob)
+    const numClusters = 5 + Math.floor(cpu / 20);
+    const swayBase = Math.sin(now * 1.2 + seed * 0.01) * 2;
+
+    for (let i = 0; i < numClusters; i++) {
+        const angle = (i / numClusters) * Math.PI * 2 + rng() * 0.5;
+        const dist = rng() * baseR * 0.8;
+        const clusterR = 4 + rng() * (baseR * 0.4);
+        const lx = cx + Math.cos(angle) * dist + swayBase * (1 + rng() * 0.5);
+        const ly = cy + Math.sin(angle) * dist * 0.7 - baseR * 0.2;
+
+        // Leaf cluster — irregular shape
+        const shade = rng();
+        const col = shade < 0.33 ? leafDark : (shade < 0.66 ? leafColor : leafLight);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        // Organic blob shape
+        const pts = 6;
+        for (let p = 0; p <= pts; p++) {
+            const a = (p / pts) * Math.PI * 2;
+            const r = clusterR * (0.7 + rng() * 0.5);
+            const px = lx + Math.cos(a) * r;
+            const py = ly + Math.sin(a) * r * 0.8;
+            if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // Canopy highlight (sun)
+    ctx.fillStyle = `rgba(255,255,200,0.08)`;
+    ctx.beginPath();
+    ctx.arc(cx - baseR * 0.3, cy - baseR * 0.4, baseR * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shadow under canopy
+    ctx.fillStyle = 'rgba(0,30,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + baseR * 0.8, baseR * 0.9, baseR * 0.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function _forestDrawLeafCluster(ctx, entity, pos, now) {
+    const cx = pos.x + pos.w / 2;
+    const cy = pos.y + pos.h / 2;
+    const state = entity.state || 'unknown';
+    const r = Math.max(3, pos.w / 2);
+    const seed = Math.abs(_forestHash(entity.id || ''));
+
+    let color;
+    if (state === 'healthy' || state === 'running') color = '#4ade80';
+    else if (state === 'warning' || state === 'idle') color = '#fbbf24';
+    else if (state === 'critical') color = '#ef4444';
+    else if (state === 'stopped') color = '#8b4513';
+    else color = FOREST_STATE_COLORS[state] || '#6b7280';
+
+    const sway = Math.sin(now * 1.5 + seed * 0.01) * 1;
+
+    // Small leaf cluster
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx + sway, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Leaf detail
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.arc(cx + sway - r * 0.3, cy - r * 0.3, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function _forestDrawUndergrowth(ctx, W, H, now) {
+    _forestState.undergrowth.forEach(ug => {
+        const sway = Math.sin(now * 0.8 + ug.phase) * 1.5;
+        if (ug.kind === 'bush') {
+            ctx.fillStyle = '#1a5c1a';
+            ctx.beginPath();
+            ctx.arc(ug.x + sway, ug.y, ug.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#2a7a2a';
+            ctx.beginPath();
+            ctx.arc(ug.x + sway - 2, ug.y - 2, ug.size * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (ug.kind === 'fern') {
+            ctx.strokeStyle = '#2d6b2d';
+            ctx.lineWidth = 1;
+            for (let f = 0; f < 3; f++) {
+                const fx = ug.x + (f - 1) * 4 + sway;
+                ctx.beginPath();
+                ctx.moveTo(fx, ug.y);
+                ctx.quadraticCurveTo(fx + sway * 2, ug.y - ug.size * 0.7, fx + sway * 3, ug.y - ug.size);
+                ctx.stroke();
+                // Fern fronds
+                for (let ff = 0; ff < 3; ff++) {
+                    const fy = ug.y - ug.size * (ff + 1) * 0.25;
+                    ctx.beginPath();
+                    ctx.moveTo(fx + sway, fy);
+                    ctx.lineTo(fx + sway + 3, fy - 2);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(fx + sway, fy);
+                    ctx.lineTo(fx + sway - 3, fy - 2);
+                    ctx.stroke();
+                }
+            }
+        } else if (ug.kind === 'mushroom') {
+            // Stem
+            ctx.fillStyle = '#e8d8c0';
+            ctx.fillRect(ug.x - 1, ug.y - ug.size * 0.4, 3, ug.size * 0.4);
+            // Cap
+            ctx.fillStyle = '#cc3333';
+            ctx.beginPath();
+            ctx.arc(ug.x + 0.5, ug.y - ug.size * 0.4, ug.size * 0.35, Math.PI, 0);
+            ctx.fill();
+            // Spots
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(ug.x - 1, ug.y - ug.size * 0.5, 1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(ug.x + 2, ug.y - ug.size * 0.55, 0.8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+}
+
+function _forestDrawFireflies(ctx, W, H, now) {
+    _forestState.fireflies.forEach(ff => {
+        // Update position
+        ff.x += ff.vx * 0.016;
+        ff.y += ff.vy * 0.016;
+        ff.vx += (Math.sin(now + ff.phase) * 5 - ff.vx * 0.5) * 0.016;
+        ff.vy += (Math.cos(now * 0.7 + ff.phase) * 3 - ff.vy * 0.5) * 0.016;
+        // Wrap
+        if (ff.x < 0) ff.x = W;
+        if (ff.x > W) ff.x = 0;
+        if (ff.y < H * 0.2) ff.y = H * 0.7;
+        if (ff.y > H * 0.8) ff.y = H * 0.3;
+
+        const glow = ff.brightness * (0.5 + 0.5 * Math.sin(now * 3 + ff.phase));
+        // Glow
+        const grad = ctx.createRadialGradient(ff.x, ff.y, 0, ff.x, ff.y, 6);
+        grad.addColorStop(0, `rgba(200,255,100,${glow * 0.6})`);
+        grad.addColorStop(1, 'rgba(200,255,100,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(ff.x, ff.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        // Core
+        ctx.fillStyle = `rgba(255,255,180,${glow})`;
+        ctx.beginPath();
+        ctx.arc(ff.x, ff.y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function _forestDrawPetals(ctx, W, H, now) {
+    _forestState.petals.forEach(petal => {
+        petal.y += petal.vy * 0.016;
+        petal.x += petal.vx * 0.016 + Math.sin(now * 2 + petal.rot) * 0.3;
+        petal.rot += petal.rotSpeed * 0.016;
+        // Reset if off screen
+        if (petal.y > H) {
+            petal.y = -5;
+            petal.x = Math.random() * W;
+        }
+        ctx.save();
+        ctx.translate(petal.x, petal.y);
+        ctx.rotate(petal.rot);
+        ctx.fillStyle = petal.color;
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, petal.size, petal.size * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+}
+
 metaphorRenderers.forest = {
     computeLayout(entities, W, H) {
         const layout = {};
@@ -682,26 +1357,45 @@ metaphorRenderers.forest = {
         const spacing = W / Math.max(roots.length, 1);
         roots.forEach((root, i) => {
             const tx = i * spacing + spacing / 2;
-            const trunkH = H * 0.6;
-            layout[root.id] = { x: tx - 15, y: H - trunkH - 40, w: 30, h: trunkH };
+            const trunkH = H * 0.35;
+            const trunkW = 30 + ((root.metrics || {}).mem || 50) / 100 * 20;
+            // Trunk (cluster/grove) — bottom half of canvas
+            layout[root.id] = {
+                x: tx - trunkW / 2,
+                y: H * 0.35,
+                w: trunkW,
+                h: trunkH,
+            };
 
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
             children.forEach((child, ci) => {
-                const angle = -Math.PI/2 + (ci - (children.length-1)/2) * 0.5;
-                const branchLen = 60;
+                // Canopy (node/tree) positioned around trunk top
+                const angle = -Math.PI / 2 + (ci - (children.length - 1) / 2) * 0.7;
+                const branchLen = 40 + ((child.metrics || {}).cpu || 50) / 100 * 30;
                 const bx = tx + Math.cos(angle) * branchLen;
-                const by = (H - trunkH - 40) + Math.sin(angle) * branchLen;
-                const leafSize = 30;
-                layout[child.id] = { x: bx - leafSize/2, y: by - leafSize/2, w: leafSize, h: leafSize };
+                const by = H * 0.35 + Math.sin(angle) * branchLen;
+                const canopySize = 25 + ((child.metrics || {}).mem || 50) / 100 * 20;
+                layout[child.id] = {
+                    x: bx - canopySize / 2,
+                    y: by - canopySize / 2,
+                    w: canopySize,
+                    h: canopySize,
+                };
 
                 const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
                 grandchildren.forEach((gc, gi) => {
-                    const subAngle = angle + (gi - (grandchildren.length-1)/2) * 0.3;
-                    const subLen = 35;
+                    // Leaf clusters (container) around canopy
+                    const subAngle = angle + (gi - (grandchildren.length - 1) / 2) * 0.4;
+                    const subLen = 15 + gi * 5;
                     const sx = bx + Math.cos(subAngle) * subLen;
                     const sy = by + Math.sin(subAngle) * subLen;
-                    const fruitSize = 12;
-                    layout[gc.id] = { x: sx - fruitSize/2, y: sy - fruitSize/2, w: fruitSize, h: fruitSize };
+                    const leafSize = 8 + ((gc.metrics || {}).cpu || 30) / 100 * 6;
+                    layout[gc.id] = {
+                        x: sx - leafSize / 2,
+                        y: sy - leafSize / 2,
+                        w: leafSize,
+                        h: leafSize,
+                    };
                 });
             });
         });
@@ -709,37 +1403,65 @@ metaphorRenderers.forest = {
     },
 
     render(ctx, entities, layout, W, H, COLORS) {
-        ctx.fillStyle = '#0a0a1a';
-        ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = '#1a2e1a';
-        ctx.fillRect(0, H - 40, W, 40);
+        // Init scene
+        if (!_forestState.initialized || _forestState.lastW !== W || _forestState.lastH !== H) {
+            _forestInitScene(W, H);
+        }
+        const now = performance.now() / 1000 - _forestState.startTime;
 
+        // Layer 0: Sky gradient + sun + stars
+        _forestDrawSky(ctx, W, H, now);
+
+        // Layer 1: Distant tree silhouettes
+        _forestDrawDistantTrees(ctx, W, H);
+
+        // Layer 2: Ground with soil, grass, rocks, stream
+        _forestDrawGround(ctx, W, H, now);
+
+        // Layer 3: Trees — trunks (clusters)
+        entities.forEach(entity => {
+            const pos = layout[entity.id];
+            if (!pos || entity.type !== 'cluster') return;
+            _forestDrawTree(ctx, entity, pos, now, layout);
+        });
+
+        // Layer 3b: Canopies (nodes)
+        entities.forEach(entity => {
+            const pos = layout[entity.id];
+            if (!pos || entity.type !== 'node') return;
+            _forestDrawCanopy(ctx, entity, pos, now, layout);
+        });
+
+        // Layer 3c: Leaf clusters (containers)
+        entities.forEach(entity => {
+            const pos = layout[entity.id];
+            if (!pos || entity.type !== 'container') return;
+            _forestDrawLeafCluster(ctx, entity, pos, now);
+        });
+
+        // Layer 4: Undergrowth
+        _forestDrawUndergrowth(ctx, W, H, now);
+
+        // Layer 4b: Fireflies
+        _forestDrawFireflies(ctx, W, H, now);
+
+        // Layer 4c: Falling petals
+        _forestDrawPetals(ctx, W, H, now);
+
+        // Layer 5: Labels
         entities.forEach(entity => {
             const pos = layout[entity.id];
             if (!pos) return;
-            const color = COLORS[entity.state] || COLORS.unknown;
-
             if (entity.type === 'cluster') {
-                ctx.fillStyle = '#78350f';
-                ctx.fillRect(pos.x, pos.y, pos.w, pos.h);
-                ctx.fillStyle = color;
+                // Grove label
+                ctx.fillStyle = 'rgba(255,255,220,0.9)';
                 ctx.font = 'bold 11px system-ui, sans-serif';
-                ctx.fillText(entity.name, pos.x - 20, pos.y - 8);
+                ctx.fillText(entity.name || '', pos.x - 10, pos.y - 5);
             } else if (entity.type === 'node') {
-                ctx.beginPath();
-                ctx.arc(pos.x + pos.w/2, pos.y + pos.h/2, pos.w/2, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.globalAlpha = 0.7;
-                ctx.fill();
-                ctx.globalAlpha = 1.0;
-                ctx.fillStyle = '#e5e7eb';
+                // Tree label
+                ctx.fillStyle = 'rgba(230,255,230,0.8)';
                 ctx.font = '9px system-ui, sans-serif';
-                ctx.fillText(entity.name.slice(0, 10), pos.x - 5, pos.y - 4);
-            } else {
-                ctx.beginPath();
-                ctx.arc(pos.x + pos.w/2, pos.y + pos.h/2, pos.w/2, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
+                ctx.fillText((entity.name || '').slice(0, 12), pos.x - 3, pos.y - 3);
             }
         });
     }
