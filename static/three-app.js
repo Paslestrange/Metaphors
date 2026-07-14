@@ -1,7 +1,8 @@
-// static/three-app.js
-// Three.js WebGL city renderer for the Metaphors dashboard
+// static/three-app.js - Three.js WebGL renderer for city metaphor
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-class ThreeApp {
+class CityRenderer3D {
     constructor(container) {
         this.container = container;
         this.scene = null;
@@ -11,14 +12,10 @@ class ThreeApp {
         this.buildings = new Map(); // entity.id -> mesh
         this.entities = [];
         this.pointLights = [];
-        this.raycaster = new THREE.Raycaster();
-        this.mouse = new THREE.Vector2();
-        this.hoveredEntity = null;
-        this.selectedEntity = null;
         this.clock = new THREE.Clock();
         this.animating = false;
-
-        // Colors matching the 2D renderer
+        
+        // State colors
         this.COLORS = {
             healthy: 0x4ade80,
             running: 0x60a5fa,
@@ -31,80 +28,83 @@ class ThreeApp {
             scaling: 0x06b6d4,
             unknown: 0x6b7280
         };
-
+        
         this.WALL_COLOR = 0x1a1a3e;
         this.GROUND_COLOR = 0x0d0d22;
         this.ROAD_COLOR = 0x111128;
     }
-
+    
     init() {
         // Scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0a0a1a);
         this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
-
-        // Camera
+        
+        // Camera - 45 degree angle looking down
         const aspect = this.container.clientWidth / this.container.clientHeight;
         this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-        this.camera.position.set(50, 50, 50);
+        this.camera.position.set(80, 80, 80);
         this.camera.lookAt(0, 0, 0);
-
-        // Renderer
+        
+        // Renderer with antialiasing
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
-
+        
         // Lights
         this.setupLights();
-
+        
         // Ground
         this.createGround();
-
+        
         // Controls
-        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         this.controls.maxPolarAngle = Math.PI / 2.2;
-        this.controls.minDistance = 10;
-        this.controls.maxDistance = 200;
-
+        this.controls.minDistance = 20;
+        this.controls.maxDistance = 300;
+        
         // Events
         window.addEventListener('resize', () => this.resize());
-        this.renderer.domElement.addEventListener('mousemove', (e) => this.onMouseMove(e));
-        this.renderer.domElement.addEventListener('click', (e) => this.onClick(e));
-
+        
         // Start animation
         this.animating = true;
         this.animate();
+        
+        return this;
     }
-
+    
     setupLights() {
-        // Ambient
+        // Ambient light
         const ambient = new THREE.AmbientLight(0x404040, 0.5);
         this.scene.add(ambient);
-
-        // Directional (sun/moon)
+        
+        // Directional light (sun/moon)
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
         dirLight.position.set(50, 100, 50);
         dirLight.castShadow = true;
-        dirLight.shadow.camera.left = -100;
-        dirLight.shadow.camera.right = 100;
-        dirLight.shadow.camera.top = 100;
-        dirLight.shadow.camera.bottom = -100;
+        dirLight.shadow.camera.left = -150;
+        dirLight.shadow.camera.right = 150;
+        dirLight.shadow.camera.top = 150;
+        dirLight.shadow.camera.bottom = -150;
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 300;
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
         this.scene.add(dirLight);
-
-        // Hemisphere for subtle color variation
+        
+        // Hemisphere light for ambient variation
         const hemiLight = new THREE.HemisphereLight(0x1a1a3e, 0x0d0d22, 0.3);
         this.scene.add(hemiLight);
     }
-
+    
     createGround() {
-        const groundGeo = new THREE.PlaneGeometry(400, 400);
+        // Ground plane
+        const groundGeo = new THREE.PlaneGeometry(500, 500);
         const groundMat = new THREE.MeshStandardMaterial({
             color: this.GROUND_COLOR,
             roughness: 0.9,
@@ -114,25 +114,26 @@ class ThreeApp {
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         this.scene.add(ground);
-
+        
         // Roads
         this.createRoads();
     }
-
+    
     createRoads() {
         const roadMat = new THREE.MeshStandardMaterial({
             color: this.ROAD_COLOR,
-            roughness: 0.8
+            roughness: 0.8,
+            metalness: 0.1
         });
-
+        
         // Grid of roads
-        const gridSize = 20;
+        const gridSize = 25;
         const spacing = 20;
-
+        
         for (let i = -gridSize; i <= gridSize; i++) {
             // Horizontal roads
             const hRoad = new THREE.Mesh(
-                new THREE.PlaneGeometry(400, 2),
+                new THREE.PlaneGeometry(500, 3),
                 roadMat
             );
             hRoad.rotation.x = -Math.PI / 2;
@@ -140,10 +141,10 @@ class ThreeApp {
             hRoad.position.z = i * spacing;
             hRoad.receiveShadow = true;
             this.scene.add(hRoad);
-
+            
             // Vertical roads
             const vRoad = new THREE.Mesh(
-                new THREE.PlaneGeometry(2, 400),
+                new THREE.PlaneGeometry(3, 500),
                 roadMat
             );
             vRoad.rotation.x = -Math.PI / 2;
@@ -153,23 +154,23 @@ class ThreeApp {
             this.scene.add(vRoad);
         }
     }
-
+    
     computeLayout(entities) {
         const layout = {};
         const byId = {};
         entities.forEach(e => { byId[e.id] = e; });
-
+        
         const roots = entities.filter(e => !e.parent);
         const blockSize = 15;
         const blockSpacing = 25;
         const cols = Math.ceil(Math.sqrt(roots.length));
-
+        
         roots.forEach((root, i) => {
             const col = i % cols;
             const row = Math.floor(i / cols);
             const baseX = (col - cols / 2) * blockSpacing;
             const baseZ = (row - cols / 2) * blockSpacing;
-
+            
             // Root building (cluster)
             layout[root.id] = {
                 x: baseX,
@@ -178,7 +179,7 @@ class ThreeApp {
                 h: 12,
                 d: 8
             };
-
+            
             // Children (nodes/services)
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
             children.forEach((child, ci) => {
@@ -186,7 +187,7 @@ class ThreeApp {
                 const radius = 10;
                 const cx = baseX + Math.cos(angle) * radius;
                 const cz = baseZ + Math.sin(angle) * radius;
-
+                
                 layout[child.id] = {
                     x: cx,
                     z: cz,
@@ -194,7 +195,7 @@ class ThreeApp {
                     h: 6,
                     d: 4
                 };
-
+                
                 // Grandchildren
                 const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
                 grandchildren.forEach((gc, gi) => {
@@ -202,7 +203,7 @@ class ThreeApp {
                     const subRadius = 4;
                     const gx = cx + Math.cos(subAngle) * subRadius;
                     const gz = cz + Math.sin(subAngle) * subRadius;
-
+                    
                     layout[gc.id] = {
                         x: gx,
                         z: gz,
@@ -213,17 +214,17 @@ class ThreeApp {
                 });
             });
         });
-
+        
         return layout;
     }
-
+    
     createBuilding(entity, layout) {
         const pos = layout[entity.id];
         if (!pos) return null;
-
+        
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
-
+        
         // Building geometry
         const geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
         const material = new THREE.MeshStandardMaterial({
@@ -233,23 +234,23 @@ class ThreeApp {
             emissive: color,
             emissiveIntensity: 0.2
         });
-
+        
         const building = new THREE.Mesh(geometry, material);
         building.position.set(pos.x, pos.h / 2, pos.z);
         building.castShadow = true;
         building.receiveShadow = true;
-        building.userData = { entityId: entity.id, entity: entity };
-
+        building.userData = { entity: entity };
+        
         this.scene.add(building);
-
-        // Windows (small emissive planes on faces)
+        
+        // Windows
         this.addWindows(building, pos, color);
-
+        
         // Rooftop details on 30% of buildings
         if (Math.random() < 0.3 && pos.w > 3) {
             this.addRooftopDetails(building, pos);
         }
-
+        
         // Point light for healthy/running
         if ((state === 'healthy' || state === 'running') && this.pointLights.length < 20) {
             const light = new THREE.PointLight(color, 0.5, 15);
@@ -257,26 +258,29 @@ class ThreeApp {
             this.scene.add(light);
             this.pointLights.push({ light, entityId: entity.id });
         }
-
+        
         return building;
     }
-
+    
     addWindows(building, pos, color) {
         const windowMat = new THREE.MeshBasicMaterial({
             color: color,
             transparent: true,
             opacity: 0.6
         });
-
-        // Front and back faces
-        const windowSize = 0.3;
+        
+        // Create windows on front/back and left/right faces
+        const windowSize = 0.4;
         const spacing = 1.5;
-        const numWindows = Math.floor(pos.w / spacing);
-
-        for (let i = 0; i < numWindows; i++) {
-            for (let j = 0; j < Math.floor(pos.h / spacing); j++) {
+        const numWindowsX = Math.floor(pos.w / spacing);
+        const numWindowsY = Math.floor(pos.h / spacing);
+        
+        for (let i = 0; i < numWindowsX; i++) {
+            for (let j = 0; j < numWindowsY; j++) {
                 if (Math.random() > 0.3) { // 70% chance of window
                     const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                    
+                    // Front face
                     const window1 = new THREE.Mesh(windowGeo, windowMat);
                     window1.position.set(
                         -pos.w / 2 + spacing / 2 + i * spacing,
@@ -284,7 +288,8 @@ class ThreeApp {
                         pos.d / 2 + 0.01
                     );
                     building.add(window1);
-
+                    
+                    // Back face
                     const window2 = new THREE.Mesh(windowGeo, windowMat);
                     window2.position.set(
                         -pos.w / 2 + spacing / 2 + i * spacing,
@@ -293,11 +298,31 @@ class ThreeApp {
                     );
                     window2.rotation.y = Math.PI;
                     building.add(window2);
+                    
+                    // Left face
+                    const window3 = new THREE.Mesh(windowGeo, windowMat);
+                    window3.position.set(
+                        -pos.w / 2 - 0.01,
+                        -pos.h / 2 + spacing / 2 + j * spacing,
+                        -pos.d / 2 + spacing / 2 + i * spacing
+                    );
+                    window3.rotation.y = -Math.PI / 2;
+                    building.add(window3);
+                    
+                    // Right face
+                    const window4 = new THREE.Mesh(windowGeo, windowMat);
+                    window4.position.set(
+                        pos.w / 2 + 0.01,
+                        -pos.h / 2 + spacing / 2 + j * spacing,
+                        -pos.d / 2 + spacing / 2 + i * spacing
+                    );
+                    window4.rotation.y = Math.PI / 2;
+                    building.add(window4);
                 }
             }
         }
     }
-
+    
     addRooftopDetails(building, pos) {
         // AC unit
         const acGeo = new THREE.BoxGeometry(pos.w * 0.2, 0.5, pos.d * 0.2);
@@ -306,12 +331,22 @@ class ThreeApp {
         ac.position.set(pos.w * 0.25, pos.h / 2 + 0.25, pos.d * 0.25);
         ac.castShadow = true;
         building.add(ac);
+        
+        // Antenna
+        if (pos.w > 5) {
+            const antennaGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.5);
+            const antennaMat = new THREE.MeshStandardMaterial({ color: 0x3a3a5a });
+            const antenna = new THREE.Mesh(antennaGeo, antennaMat);
+            antenna.position.set(-pos.w * 0.2, pos.h / 2 + 0.75, -pos.d * 0.2);
+            antenna.castShadow = true;
+            building.add(antenna);
+        }
     }
-
+    
     updateEntities(entities) {
         const layout = this.computeLayout(entities);
         const currentIds = new Set(entities.map(e => e.id));
-
+        
         // Remove buildings that no longer exist
         for (const [id, mesh] of this.buildings) {
             if (!currentIds.has(id)) {
@@ -319,9 +354,16 @@ class ThreeApp {
                 mesh.geometry.dispose();
                 mesh.material.dispose();
                 this.buildings.delete(id);
+                
+                // Remove point light if exists
+                const lightIdx = this.pointLights.findIndex(l => l.entityId === id);
+                if (lightIdx >= 0) {
+                    this.scene.remove(this.pointLights[lightIdx].light);
+                    this.pointLights.splice(lightIdx, 1);
+                }
             }
         }
-
+        
         // Add or update buildings
         entities.forEach(entity => {
             if (this.buildings.has(entity.id)) {
@@ -336,33 +378,33 @@ class ThreeApp {
                 }
             }
         });
-
+        
         this.entities = entities;
     }
-
+    
     updateBuildingState(mesh, entity) {
         const state = entity.state || 'unknown';
         const color = this.COLORS[state] || this.COLORS.unknown;
         mesh.material.emissive.setHex(color);
         mesh.userData.entity = entity;
     }
-
+    
     animate() {
         if (!this.animating) return;
-
+        
         requestAnimationFrame(() => this.animate());
-
+        
         const delta = this.clock.getDelta();
         const elapsed = this.clock.getElapsedTime();
-
+        
         // Update controls
         this.controls.update();
-
+        
         // Animate buildings
         this.buildings.forEach((mesh, id) => {
             const entity = mesh.userData.entity;
             const state = entity.state || 'unknown';
-
+            
             // Critical: pulse emissive
             if (state === 'critical') {
                 const pulse = 0.2 + 0.3 * Math.abs(Math.sin(elapsed * 4));
@@ -379,55 +421,23 @@ class ThreeApp {
                 mesh.material.emissiveIntensity = flicker;
             }
         });
-
+        
         // Render
         this.renderer.render(this.scene, this.camera);
     }
-
-    onMouseMove(event) {
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        this.raycaster.setFromCamera(this.mouse, this.camera);
-        const intersects = this.raycaster.intersectObjects(Array.from(this.buildings.values()));
-
-        if (intersects.length > 0) {
-            const mesh = intersects[0].object;
-            this.hoveredEntity = mesh.userData.entity;
-            this.renderer.domElement.style.cursor = 'pointer';
-
-            // Dispatch custom event for main.js
-            window.dispatchEvent(new CustomEvent('three-hover', { detail: { entity: this.hoveredEntity } }));
-        } else {
-            this.hoveredEntity = null;
-            this.renderer.domElement.style.cursor = 'grab';
-            window.dispatchEvent(new CustomEvent('three-hover', { detail: { entity: null } }));
-        }
-    }
-
-    onClick(event) {
-        if (this.hoveredEntity) {
-            this.selectedEntity = this.hoveredEntity;
-            window.dispatchEvent(new CustomEvent('three-click', { detail: { entity: this.selectedEntity } }));
-        } else {
-            this.selectedEntity = null;
-            window.dispatchEvent(new CustomEvent('three-click', { detail: { entity: null } }));
-        }
-    }
-
+    
     resize() {
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
-
+        
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
     }
-
+    
     dispose() {
         this.animating = false;
-
+        
         // Remove all buildings
         this.buildings.forEach((mesh) => {
             this.scene.remove(mesh);
@@ -435,18 +445,20 @@ class ThreeApp {
             mesh.material.dispose();
         });
         this.buildings.clear();
-
+        
         // Remove point lights
         this.pointLights.forEach(({ light }) => {
             this.scene.remove(light);
         });
         this.pointLights = [];
-
-        // Dispose renderer
+        
+        // Remove renderer
+        if (this.renderer.domElement.parentNode) {
+            this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+        }
         this.renderer.dispose();
-        this.container.removeChild(this.renderer.domElement);
     }
 }
 
 // Export for use in main.js
-window.ThreeApp = ThreeApp;
+window.CityRenderer3D = CityRenderer3D;

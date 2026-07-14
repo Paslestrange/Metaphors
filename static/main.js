@@ -12,6 +12,10 @@ const DPR = window.devicePixelRatio || 1;
 let mouseX = 0;
 let mouseY = 0;
 
+// Three.js integration
+let threeRenderer = null;
+let useThreeJS = false;
+
 // --- Zoom / Pan state ---
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 5.0;
@@ -2699,6 +2703,7 @@ function connect() {
         const data = JSON.parse(e.data);
         if (data.type === 'entities') {
             entities = data.entities || [];
+            if (useThreeJS && threeRenderer) threeRenderer.updateEntities(entities);
             render();
             updateStats();
             _ensureAnimLoop();
@@ -2764,8 +2769,19 @@ function switchMetaphor(newMetaphor) {
         localStorage.setItem('metaphor', newMetaphor);
 
         // Toggle canvases for 3D metaphors
+        const canvas2d = document.getElementById('canvas');
         const canvas3d = document.getElementById('canvas3d');
         const space3dContainer = document.getElementById('space3d-container');
+        
+        if (canvas2d) {
+            // Hide 2D canvas for 3D metaphors
+            if (newMetaphor === 'space' || newMetaphor === 'city3d') {
+                canvas2d.style.display = 'none';
+            } else {
+                canvas2d.style.display = 'block';
+            }
+        }
+        
         if (canvas3d) {
             if (newMetaphor === 'city3d') {
                 canvas3d.style.display = 'block';
@@ -2773,6 +2789,7 @@ function switchMetaphor(newMetaphor) {
                 canvas3d.style.display = 'none';
             }
         }
+        
         if (space3dContainer) {
             if (newMetaphor === 'space') {
                 space3dContainer.style.display = 'block';
@@ -2852,6 +2869,7 @@ function computeLayout() {
 }
 
 function render() {
+    if (useThreeJS) return;
     const W = canvas.width / DPR;
     const H = canvas.height / DPR;
 
@@ -3467,6 +3485,52 @@ function updateStats() {
         .map(([s, n]) => `<span style="color:${COLORS[s] || '#6b7280'}">${s}: ${n}</span>`)
         .join(' &middot; ');
 }
+
+// ============================================================
+// Three.js integration
+// ============================================================
+function initThreeJS() {
+    if (typeof CityRenderer3D !== 'undefined' && !threeRenderer) {
+        const container = document.getElementById('canvas').parentElement;
+        threeRenderer = new CityRenderer3D(container);
+        threeRenderer.init();
+        if (currentMetaphor === 'city') {
+            useThreeJS = true;
+            canvas.style.display = 'none';
+            if (entities.length > 0) {
+                threeRenderer.updateEntities(entities);
+            }
+        }
+        console.log('Three.js renderer initialized');
+    }
+}
+
+// Poll until the ES module loads (modules load async)
+const _threeCheckInterval = setInterval(() => {
+    if (typeof CityRenderer3D !== 'undefined') {
+        clearInterval(_threeCheckInterval);
+        initThreeJS();
+    }
+}, 100);
+
+// Override switchMetaphor to toggle Three.js for city metaphor
+const _origSwitchMetaphor = switchMetaphor;
+switchMetaphor = function(newMetaphor) {
+    _origSwitchMetaphor(newMetaphor);
+    if (threeRenderer) {
+        if (newMetaphor === 'city') {
+            useThreeJS = true;
+            canvas.style.display = 'none';
+            threeRenderer.resize();
+            if (entities.length > 0) {
+                threeRenderer.updateEntities(entities);
+            }
+        } else {
+            useThreeJS = false;
+            canvas.style.display = 'block';
+        }
+    }
+};
 
 // ============================================================
 // Init
