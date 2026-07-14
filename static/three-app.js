@@ -90,7 +90,10 @@ class CityRenderer3D {
         
         // Events
         window.addEventListener('resize', () => this.resize());
-        
+
+        // Hover interaction
+        this._setupHover();
+
         // Start animation
         this.animating = true;
         this.animate();
@@ -613,6 +616,108 @@ class CityRenderer3D {
             antenna.castShadow = true;
             building.add(antenna);
         }
+    }
+    
+    createStarField() {
+        // 1000 stars in upper hemisphere
+        const starGeo = new THREE.BufferGeometry();
+        const starPositions = new Float32Array(1000 * 3);
+        const starSizes = new Float32Array(1000);
+        
+        for (let i = 0; i < 1000; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI * 0.5;
+            const radius = 200 + Math.random() * 100;
+            
+            starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+            starPositions[i * 3 + 1] = radius * Math.cos(phi);
+            starPositions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+            starSizes[i] = Math.random() * 2 + 0.5;
+        }
+        
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+        
+        const starMat = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 1.5,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.8
+        });
+        
+        this.starField = new THREE.Points(starGeo, starMat);
+        this.scene.add(this.starField);
+    }
+    
+    createRain() {
+        // 500 rain particles falling vertically
+        const rainGeo = new THREE.BufferGeometry();
+        const rainPositions = new Float32Array(500 * 3);
+        
+        for (let i = 0; i < 500; i++) {
+            rainPositions[i * 3] = (Math.random() - 0.5) * 200;
+            rainPositions[i * 3 + 1] = Math.random() * 100;
+            rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+        }
+        
+        rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+        
+        const rainMat = new THREE.PointsMaterial({
+            color: 0xaaaaff,
+            size: 0.5,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.6
+        });
+        
+        this.rainParticles = new THREE.Points(rainGeo, rainMat);
+        this.scene.add(this.rainParticles);
+    }
+    
+    createMoon() {
+        // Moon sphere with emissive material
+        const moonGeo = new THREE.SphereGeometry(8, 32, 32);
+        const moonMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.9
+        });
+        
+        this.moon = new THREE.Mesh(moonGeo, moonMat);
+        this.moon.position.set(-60, 120, -40);
+        this.scene.add(this.moon);
+    }
+    
+    createCityHaze() {
+        // Large transparent plane at horizon with gradient (orange/purple)
+        const hazeGeo = new THREE.PlaneGeometry(500, 100);
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        
+        const gradient = ctx.createLinearGradient(0, 0, 0, 64);
+        gradient.addColorStop(0, 'rgba(255, 140, 50, 0.3)');
+        gradient.addColorStop(0.5, 'rgba(200, 100, 150, 0.2)');
+        gradient.addColorStop(1, 'rgba(100, 50, 150, 0.1)');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 64);
+        
+        const hazeTexture = new THREE.CanvasTexture(canvas);
+        const hazeMat = new THREE.MeshBasicMaterial({
+            map: hazeTexture,
+            transparent: true,
+            opacity: 0.4,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        
+        const haze = new THREE.Mesh(hazeGeo, hazeMat);
+        haze.position.set(0, 5, -150);
+        this.scene.add(haze);
     }
     
     updateEntities(entities) {
