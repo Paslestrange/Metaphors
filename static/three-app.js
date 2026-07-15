@@ -397,7 +397,7 @@ class CityRenderer3D {
         });
     }
     
-    computeLayout(entities, W, H) {
+    computeLayout(entities) {
         const layout = {};
         const byId = {};
         entities.forEach(e => { byId[e.id] = e; });
@@ -880,7 +880,7 @@ class CityRenderer3D {
     updateEntities(entities) {
         const W = this.container.clientWidth || 1200;
         const H = this.container.clientHeight || 800;
-        const layout = this.computeLayout(entities, W, H);
+        const layout = this.computeLayout(entities);
         const currentIds = new Set(entities.map(e => e.id));
         
         // Remove buildings + labels that no longer exist
