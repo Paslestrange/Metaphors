@@ -405,9 +405,16 @@ class CityRenderer3D {
         const roots = entities.filter(e => !e.parent);
         if (!roots.length) return layout;
         
+        // Scale pixel-space coordinates to fit 3D camera view
+        // Camera at (80,80,80) sees ~160 units, so scale to fit ~150 unit world
+        const WORLD_W = 150;
+        const WORLD_D = 120;
+        const sx = WORLD_W / Math.max(W, 1);
+        const sz = WORLD_D / Math.max(H, 1);
+        
         // District layout: arrange clusters side by side
-        const districtWidth = W / Math.max(roots.length, 1);
-        const groundY = H - 50;
+        const districtWidth = WORLD_W / Math.max(roots.length, 1);
+        const groundY = 0;
         
         roots.forEach((root, di) => {
             const dx = di * districtWidth;
@@ -416,20 +423,20 @@ class CityRenderer3D {
             // Cluster = wireframe boundary on ground
             layout[root.id] = {
                 type: 'cluster',
-                x: dx + 10,
+                x: dx + 2,
                 y: 0,
-                z: 50,
-                w: districtWidth - 20,
-                h: 1,
-                d: H - 100
+                z: 5,
+                w: districtWidth - 4,
+                h: 0.5,
+                d: WORLD_D - 10
             };
             
             const children = (root.children || []).map(id => byId[id]).filter(Boolean);
             if (!children.length) return;
             
             // Block layout: arrange nodes within district
-            const blockWidth = (districtWidth - 40) / Math.max(children.length, 1);
-            const blockStartX = dx + 20;
+            const blockWidth = (districtWidth - 8) / Math.max(children.length, 1);
+            const blockStartX = dx + 4;
             
             children.forEach((child, bi) => {
                 const bx = blockStartX + bi * blockWidth;
@@ -438,12 +445,12 @@ class CityRenderer3D {
                 // Node = ground section with different shade
                 layout[child.id] = {
                     type: 'node',
-                    x: bx + 5,
+                    x: bx + 2,
                     y: 0,
-                    z: 60,
-                    w: blockWidth - 10,
-                    h: 0.5,
-                    d: H - 120
+                    z: 8,
+                    w: blockWidth - 4,
+                    h: 0.3,
+                    d: WORLD_D - 20
                 };
                 
                 const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
@@ -451,26 +458,26 @@ class CityRenderer3D {
                 
                 // Service buildings within block
                 const servicesPerRow = Math.min(3, grandchildren.length);
-                const serviceWidth = (blockWidth - 20) / servicesPerRow;
+                const serviceWidth = (blockWidth - 6) / servicesPerRow;
                 
                 grandchildren.forEach((gc, gi) => {
                     const metrics = gc.metrics || {};
                     const cpu = Math.max(0, Math.min(100, metrics.cpu || 50));
                     const mem = Math.max(0, Math.min(100, metrics.mem || 50));
                     
-                    const bw = Math.max(8, Math.min(20, 8 + (mem / 100) * 12));
-                    const bh = Math.max(15, Math.min(60, 15 + (cpu / 100) * 45));
+                    const bw = Math.max(3, Math.min(8, 3 + (mem / 100) * 5));
+                    const bh = Math.max(5, Math.min(25, 5 + (cpu / 100) * 20));
                     
                     const col = gi % servicesPerRow;
                     const row = Math.floor(gi / servicesPerRow);
-                    const sx = bx + 10 + col * serviceWidth + (serviceWidth - bw) / 2;
-                    const sz = 80 + row * 40;
+                    const sx2 = bx + 3 + col * serviceWidth + (serviceWidth - bw) / 2;
+                    const sz2 = 12 + row * 15;
                     
                     layout[gc.id] = {
                         type: 'service',
-                        x: sx,
+                        x: sx2,
                         y: bh / 2,
-                        z: sz,
+                        z: sz2,
                         w: bw,
                         h: bh,
                         d: bw
@@ -481,30 +488,30 @@ class CityRenderer3D {
                     greatGrandchildren.forEach((gg, ggi) => {
                         const angle = (ggi / Math.max(greatGrandchildren.length, 1)) * Math.PI * 2;
                         const radius = bw * 0.7;
-                        const gex = sx + bw / 2 + Math.cos(angle) * radius;
-                        const gez = sz + bw / 2 + Math.sin(angle) * radius;
+                        const gex = sx2 + bw / 2 + Math.cos(angle) * radius;
+                        const gez = sz2 + bw / 2 + Math.sin(angle) * radius;
                         
                         if (gg.type === 'process') {
                             // Process = tiny dot on ground
                             layout[gg.id] = {
                                 type: 'process',
                                 x: gex,
-                                y: 0.5,
+                                y: 0.3,
                                 z: gez,
-                                w: 1.5,
-                                h: 1.5,
-                                d: 1.5
+                                w: 0.6,
+                                h: 0.6,
+                                d: 0.6
                             };
                         } else {
                             // Container = small box at building base
                             layout[gg.id] = {
                                 type: 'container',
                                 x: gex,
-                                y: 1,
+                                y: 0.5,
                                 z: gez,
-                                w: 3,
-                                h: 2,
-                                d: 3
+                                w: 1.2,
+                                h: 1,
+                                d: 1.2
                             };
                         }
                     });
@@ -873,7 +880,9 @@ class CityRenderer3D {
     }
     
     updateEntities(entities) {
-        const layout = this.computeLayout(entities);
+        const W = this.container.clientWidth || 1200;
+        const H = this.container.clientHeight || 800;
+        const layout = this.computeLayout(entities, W, H);
         const currentIds = new Set(entities.map(e => e.id));
         
         // Remove buildings + labels that no longer exist
