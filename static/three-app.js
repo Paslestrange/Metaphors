@@ -51,14 +51,14 @@ class CityRenderer3D {
     init() {
         // Scene
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x050510);
-        this.scene.fog = new THREE.FogExp2(0x0a0820, 0.006);
+        this.scene.background = new THREE.Color(0x0a0820);
+        this.scene.fog = new THREE.FogExp2(0x0a0820, 0.001);
         
         // Camera - 45 degree angle looking down
         const aspect = this.container.clientWidth / this.container.clientHeight;
-        this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-        this.camera.position.set(80, 80, 80);
-        this.camera.lookAt(0, 0, 0);
+        this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 2000);
+        this.camera.position.set(90, 50, 90);
+        this.camera.lookAt(0, 10, 0);
         
         // Renderer with antialiasing
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -142,37 +142,6 @@ class CityRenderer3D {
 
         canvas.addEventListener('mousemove', this._onMouseMove);
         canvas.addEventListener('mouseleave', this._onMouseLeave);
-
-        // Click handler — populate entity detail panel
-        this._onClick = (event) => {
-            if (this._wasDragged) { this._wasDragged = false; return; }
-            const rect = canvas.getBoundingClientRect();
-            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-            this.raycaster.setFromCamera(this.mouse, this.camera);
-            const meshes = Array.from(this.buildings.values());
-            const intersects = this.raycaster.intersectObjects(meshes, false);
-            if (intersects.length > 0) {
-                const entity = intersects[0].object.userData.entity;
-                if (entity && typeof window.showDetailPanel === 'function') {
-                    window.showDetailPanel(entity);
-                }
-            } else if (typeof window.hideDetailPanel === 'function') {
-                window.hideDetailPanel();
-            }
-        };
-
-        this._wasDragged = false;
-        this._onMouseDown = (e) => { this._mouseDownX = e.clientX; this._mouseDownY = e.clientY; };
-        this._onMouseUp = (e) => {
-            if (Math.hypot(e.clientX - this._mouseDownX, e.clientY - this._mouseDownY) > 4) {
-                this._wasDragged = true;
-            }
-        };
-
-        canvas.addEventListener('click', this._onClick);
-        canvas.addEventListener('mousedown', this._onMouseDown);
-        canvas.addEventListener('mouseup', this._onMouseUp);
     }
 
     _hover(mesh) {
@@ -438,94 +407,114 @@ class CityRenderer3D {
         
         // Scale pixel-space coordinates to fit 3D camera view
         // Camera at (80,80,80) sees ~160 units, so use a 150x120 world
-        // CENTER layout around origin so camera can see everything
         const WORLD_W = 150;
         const WORLD_D = 120;
-        const CENTER_X = -WORLD_W / 2;  // Offset to center around x=0
-        const CENTER_Z = -WORLD_D / 2;  // Offset to center around z=0
         
-        // RECURSIVE LAYOUT: Handle entities at ANY depth in the hierarchy
-        // This ensures ALL 25+ entities are positioned and visible
-        function layoutRecursive(parentEntity, parentX, parentZ, parentW, parentD, depth) {
-            const children = (parentEntity.children || [])
-                .map(id => byId[id])
-                .filter(Boolean);
-            
-            if (!children.length) return;
-            
-            // Arrange children in a grid within parent bounds
-            const cols = Math.ceil(Math.sqrt(children.length));
-            const rows = Math.ceil(children.length / cols);
-            const cellW = parentW / cols;
-            const cellD = parentD / rows;
-            
-            children.forEach((child, idx) => {
-                const col = idx % cols;
-                const row = Math.floor(idx / cols);
-                
-                const cx = parentX + col * cellW;
-                const cz = parentZ + row * cellD;
-                
-                // ALL entities become VISIBLE 3D buildings
-                // Type based on entity.type, not depth
-                const entityType = child.type;
-                const metrics = child.metrics || {};
-                const cpu = Math.max(0, Math.min(100, metrics.cpu || metrics.cpu_pct || 50));
-                
-                let buildingType, bw, bh, bd;
-                
-                if (entityType === 'cluster') {
-                    buildingType = 'cluster';
-                    bw = cellW - 2;
-                    bh = 0.5;
-                    bd = cellD - 2;
-                } else if (entityType === 'node' || entityType === 'namespace') {
-                    buildingType = 'node';
-                    bw = Math.max(5, cellW - 3);
-                    bh = Math.max(2, cellD * 0.3);
-                    bd = Math.max(5, cellD - 3);
-                } else if (entityType === 'service' || entityType === 'agent' || entityType === 'session' || entityType === 'queue' || entityType === 'database' || entityType === 'custom') {
-                    buildingType = 'service';
-                    bw = Math.max(3, Math.min(8, cellW * 0.6));
-                    bh = Math.max(5, Math.min(25, 5 + (cpu / 100) * 20));
-                    bd = Math.max(3, Math.min(8, cellD * 0.6));
-                } else if (entityType === 'container' || entityType === 'process') {
-                    // STILL VISIBLE as small buildings (not dots)
-                    buildingType = 'container';
-                    bw = Math.max(1.5, Math.min(3, cellW * 0.5));
-                    bh = Math.max(2, Math.min(8, 2 + (cpu / 100) * 6));
-                    bd = Math.max(1.5, Math.min(3, cellD * 0.5));
-                } else {
-                    // Unknown type: still render as visible building
-                    buildingType = 'service';
-                    bw = Math.max(3, Math.min(6, cellW * 0.5));
-                    bh = Math.max(4, Math.min(15, 4 + (cpu / 100) * 11));
-                    bd = Math.max(3, Math.min(6, cellD * 0.5));
-                }
-                
-                layout[child.id] = {
-                    type: buildingType,
-                    x: cx + (cellW - bw) / 2,
-                    y: bh / 2,
-                    z: cz + (cellD - bd) / 2,
-                    w: bw,
-                    h: bh,
-                    d: bd
-                };
-                
-                // Recurse into children (handles ANY depth)
-                layoutRecursive(child, cx, cz, cellW, cellD, depth + 1);
-            });
-        }
-        
-        // Start layout from roots
+        // District layout: arrange clusters side by side
         const districtWidth = WORLD_W / Math.max(roots.length, 1);
+        const groundY = 0;
         
         roots.forEach((root, di) => {
-            const dx = CENTER_X + di * districtWidth;
-            const dz = CENTER_Z;
+            const dx = di * districtWidth;
+            const districtCenterX = dx + districtWidth / 2;
             
-            layoutRecursive(root, dx, dz, districtWidth, WORLD_D, 0);
+            // Cluster = wireframe boundary on ground
+            layout[root.id] = {
+                type: 'cluster',
+                x: dx + 2,
+                y: 0,
+                z: 5,
+                w: districtWidth - 4,
+                h: 0.5,
+                d: WORLD_D - 10
+            };
+            
+            const children = (root.children || []).map(id => byId[id]).filter(Boolean);
+            if (!children.length) return;
+            
+            // Block layout: arrange nodes within district
+            const blockWidth = (districtWidth - 8) / Math.max(children.length, 1);
+            const blockStartX = dx + 4;
+            
+            children.forEach((child, bi) => {
+                const bx = blockStartX + bi * blockWidth;
+                const blockCenterX = bx + blockWidth / 2;
+                
+                // Node = ground section with different shade
+                layout[child.id] = {
+                    type: 'node',
+                    x: bx + 2,
+                    y: 0,
+                    z: 8,
+                    w: blockWidth - 4,
+                    h: 0.3,
+                    d: WORLD_D - 20
+                };
+                
+                const grandchildren = (child.children || []).map(id => byId[id]).filter(Boolean);
+                if (!grandchildren.length) return;
+                
+                // Service buildings within block
+                const servicesPerRow = Math.min(3, grandchildren.length);
+                const serviceWidth = (blockWidth - 6) / servicesPerRow;
+                
+                grandchildren.forEach((gc, gi) => {
+                    const metrics = gc.metrics || {};
+                    const cpu = Math.max(0, Math.min(100, metrics.cpu || 50));
+                    const mem = Math.max(0, Math.min(100, metrics.mem || 50));
+                    
+                    const bw = Math.max(3, Math.min(8, 3 + (mem / 100) * 5));
+                    const bh = Math.max(5, Math.min(25, 5 + (cpu / 100) * 20));
+                    
+                    const col = gi % servicesPerRow;
+                    const row = Math.floor(gi / servicesPerRow);
+                    const sx2 = bx + 3 + col * serviceWidth + (serviceWidth - bw) / 2;
+                    const sz2 = 12 + row * 15;
+                    
+                    layout[gc.id] = {
+                        type: 'service',
+                        x: sx2,
+                        y: bh / 2,
+                        z: sz2,
+                        w: bw,
+                        h: bh,
+                        d: bw
+                    };
+                    
+                    // Container/process entities at building base
+                    const greatGrandchildren = (gc.children || []).map(id => byId[id]).filter(Boolean);
+                    greatGrandchildren.forEach((gg, ggi) => {
+                        const angle = (ggi / Math.max(greatGrandchildren.length, 1)) * Math.PI * 2;
+                        const radius = bw * 0.7;
+                        const gex = sx2 + bw / 2 + Math.cos(angle) * radius;
+                        const gez = sz2 + bw / 2 + Math.sin(angle) * radius;
+                        
+                        if (gg.type === 'process') {
+                            // Process = tiny dot on ground
+                            layout[gg.id] = {
+                                type: 'process',
+                                x: gex,
+                                y: 0.3,
+                                z: gez,
+                                w: 0.6,
+                                h: 0.6,
+                                d: 0.6
+                            };
+                        } else {
+                            // Container = small box at building base
+                            layout[gg.id] = {
+                                type: 'container',
+                                x: gex,
+                                y: 0.5,
+                                z: gez,
+                                w: 1.2,
+                                h: 1,
+                                d: 1.2
+                            };
+                        }
+                    });
+                });
+            });
         });
         
         return layout;
@@ -577,39 +566,25 @@ class CityRenderer3D {
         } else if (type === 'service') {
             // Service = building with windows
             geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
-            
-            // Generate window texture based on state for emissive map
-            const windowData = this.createWindowTexture(pos, state);
-            
-            // Wall color: dark but slightly tinted by state
-            const wallTint = this.mixColor(this.WALL_COLOR, color, 0.15);
             material = new THREE.MeshStandardMaterial({
-                color: wallTint,
+                color: this.WALL_COLOR,
                 roughness: 0.7,
                 metalness: 0.3,
-                emissiveMap: windowData.texture,
-                emissive: new THREE.Color(windowData.litColor),
-                emissiveIntensity: state === 'stopped' ? 0.05 : 0.35
+                emissive: color,
+                emissiveIntensity: 0.2
             });
             mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(pos.x + pos.w / 2, pos.y, pos.z + pos.d / 2);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            mesh.userData = { entity: entity, windowData: windowData };
+            mesh.userData = { entity: entity };
             this.scene.add(mesh);
             
-            // Neon edge outline showing state color
-            const edgesGeo = new THREE.EdgesGeometry(geometry);
-            const edgesMat = new THREE.LineBasicMaterial({ color: color, linewidth: 1 });
-            const edgesMesh = new THREE.LineSegments(edgesGeo, edgesMat);
-            mesh.add(edgesMesh);
-            mesh.userData.edgesMesh = edgesMesh;
+            // Add windows
+            this.addWindows(mesh, pos, color);
             
-            // Add entrance on ground floor
-            this.addEntrance(mesh, pos);
-            
-            // Rooftop details on tall buildings (height > 8)
-            if (Math.random() < 0.4 && pos.h > 8) {
+            // Rooftop details on 30% of buildings
+            if (Math.random() < 0.3 && pos.w > 10) {
                 this.addRooftopDetails(mesh, pos);
             }
             
