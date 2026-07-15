@@ -142,6 +142,37 @@ class CityRenderer3D {
 
         canvas.addEventListener('mousemove', this._onMouseMove);
         canvas.addEventListener('mouseleave', this._onMouseLeave);
+
+        // Click handler — populate entity detail panel
+        this._onClick = (event) => {
+            if (this._wasDragged) { this._wasDragged = false; return; }
+            const rect = canvas.getBoundingClientRect();
+            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            const meshes = Array.from(this.buildings.values());
+            const intersects = this.raycaster.intersectObjects(meshes, false);
+            if (intersects.length > 0) {
+                const entity = intersects[0].object.userData.entity;
+                if (entity && typeof window.showDetailPanel === 'function') {
+                    window.showDetailPanel(entity);
+                }
+            } else if (typeof window.hideDetailPanel === 'function') {
+                window.hideDetailPanel();
+            }
+        };
+
+        this._wasDragged = false;
+        this._onMouseDown = (e) => { this._mouseDownX = e.clientX; this._mouseDownY = e.clientY; };
+        this._onMouseUp = (e) => {
+            if (Math.hypot(e.clientX - this._mouseDownX, e.clientY - this._mouseDownY) > 4) {
+                this._wasDragged = true;
+            }
+        };
+
+        canvas.addEventListener('click', this._onClick);
+        canvas.addEventListener('mousedown', this._onMouseDown);
+        canvas.addEventListener('mouseup', this._onMouseUp);
     }
 
     _hover(mesh) {
@@ -469,7 +500,7 @@ class CityRenderer3D {
                     const col = gi % servicesPerRow;
                     const row = Math.floor(gi / servicesPerRow);
                     const sx2 = bx + 3 + col * serviceWidth + (serviceWidth - bw) / 2;
-                    const sz2 = 12 + row * 15;
+                    const sz2 = CENTER_Z + 12 + row * 15;
                     
                     layout[gc.id] = {
                         type: 'service',

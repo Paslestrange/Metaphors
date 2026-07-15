@@ -11,7 +11,8 @@ from engine.sources.processes import ProcessSource
 from engine.sources.docker import DockerSource
 from engine.metaphors import MetaphorRegistry
 from engine.metaphors.city import CityRenderer
-from engine.metaphors.traffic_light import TrafficLightRenderer
+from engine.metaphors.space import SpaceStationRenderer
+from engine.metaphors.garden import GardenRenderer
 
 app = FastAPI(title="Metaphors", version="0.1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -19,7 +20,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Metaphor registry — register metaphors on startup
 registry = MetaphorRegistry()
 registry.register("city", CityRenderer())
-registry.register("traffic_light", TrafficLightRenderer())
+registry.register("space", SpaceStationRenderer())
+registry.register("garden", GardenRenderer())
 active_metaphor = "city"
 
 # Scheduler with both mock and live process sources
@@ -51,10 +53,6 @@ async def list_metaphors():
     metaphor_info = []
     descriptions = {
         "city": "Infrastructure as a cityscape",
-        "city3d": "Infrastructure as a 3D cyberpunk city",
-        "solar": "Systems as orbiting celestial bodies",
-        "forest": "Services as a living forest ecosystem",
-        "traffic_light": "Infrastructure as traffic signals at an intersection",
         "space": "Systems as a space station with orbiting modules",
         "garden": "Infrastructure as a garden with plants, terrain, and lighting",
     }
@@ -65,7 +63,7 @@ async def list_metaphors():
             "description": descriptions.get(name, f"The {name} metaphor"),
         })
     # Also include client-side-only metaphors that have frontend renderers
-    known_client = ["solar", "forest", "space", "city3d", "garden"]
+    known_client = ["space", "garden"]
     for name in known_client:
         if name not in names:
             metaphor_info.append({
