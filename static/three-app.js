@@ -51,8 +51,8 @@ class CityRenderer3D {
     init() {
         // Scene
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0a0a1a);
-        this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.0015);
+        this.scene.background = new THREE.Color(0x050510);
+        this.scene.fog = new THREE.FogExp2(0x0a0820, 0.006);
         
         // Camera - 45 degree angle looking down
         const aspect = this.container.clientWidth / this.container.clientHeight;
@@ -142,33 +142,6 @@ class CityRenderer3D {
 
         canvas.addEventListener('mousemove', this._onMouseMove);
         canvas.addEventListener('mouseleave', this._onMouseLeave);
-
-        // Click handler — populate entity detail panel
-        this._onClick = (event) => {
-            const rect = canvas.getBoundingClientRect();
-            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-            this.raycaster.setFromCamera(this.mouse, this.camera);
-
-            const meshes = Array.from(this.buildings.values());
-            const intersects = this.raycaster.intersectObjects(meshes, false);
-
-            if (intersects.length > 0) {
-                const hitMesh = intersects[0].object;
-                const entity = hitMesh.userData.entity;
-                if (entity && typeof window.showDetailPanel === 'function') {
-                    window.showDetailPanel(entity);
-                }
-            } else {
-                // Clicked empty space — close panel
-                if (typeof window.hideDetailPanel === 'function') {
-                    window.hideDetailPanel();
-                }
-            }
-        };
-
-        canvas.addEventListener('click', this._onClick);
     }
 
     _hover(mesh) {
@@ -593,39 +566,25 @@ class CityRenderer3D {
         } else if (type === 'service') {
             // Service = building with windows
             geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
-            
-            // Generate window texture based on state for emissive map
-            const windowData = this.createWindowTexture(pos, state);
-            
-            // Wall color: dark but slightly tinted by state
-            const wallTint = this.mixColor(this.WALL_COLOR, color, 0.15);
             material = new THREE.MeshStandardMaterial({
-                color: wallTint,
+                color: this.WALL_COLOR,
                 roughness: 0.7,
                 metalness: 0.3,
-                emissiveMap: windowData.texture,
-                emissive: new THREE.Color(windowData.litColor),
-                emissiveIntensity: state === 'stopped' ? 0.05 : 0.6
+                emissive: color,
+                emissiveIntensity: 0.2
             });
             mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(pos.x + pos.w / 2, pos.y, pos.z + pos.d / 2);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            mesh.userData = { entity: entity, windowData: windowData };
+            mesh.userData = { entity: entity };
             this.scene.add(mesh);
             
-            // Neon edge outline showing state color
-            const edgesGeo = new THREE.EdgesGeometry(geometry);
-            const edgesMat = new THREE.LineBasicMaterial({ color: color, linewidth: 1 });
-            const edgesMesh = new THREE.LineSegments(edgesGeo, edgesMat);
-            mesh.add(edgesMesh);
-            mesh.userData.edgesMesh = edgesMesh;
+            // Add windows
+            this.addWindows(mesh, pos, color);
             
-            // Add entrance on ground floor
-            this.addEntrance(mesh, pos);
-            
-            // Rooftop details on tall buildings (height > 8)
-            if (Math.random() < 0.4 && pos.h > 8) {
+            // Rooftop details on 30% of buildings
+            if (Math.random() < 0.3 && pos.w > 10) {
                 this.addRooftopDetails(mesh, pos);
             }
             
@@ -817,31 +776,42 @@ class CityRenderer3D {
     }
 
     createStarField() {
-        // 1000 stars in upper hemisphere
+        // 2000 stars in upper hemisphere — bright and visible
         const starGeo = new THREE.BufferGeometry();
-        const starPositions = new Float32Array(1000 * 3);
-        const starSizes = new Float32Array(1000);
+        const starCount = 2000;
+        const starPositions = new Float32Array(starCount * 3);
+        const starSizes = new Float32Array(starCount);
+        const starColors = new Float32Array(starCount * 3);
         
-        for (let i = 0; i < 1000; i++) {
+        for (let i = 0; i < starCount; i++) {
             const theta = Math.random() * Math.PI * 2;
-            const phi = Math.random() * Math.PI * 0.5;
-            const radius = 200 + Math.random() * 100;
+            const phi = Math.random() * Math.PI * 0.45;
+            const radius = 300 + Math.random() * 100;
             
             starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
             starPositions[i * 3 + 1] = radius * Math.cos(phi);
             starPositions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
-            starSizes[i] = Math.random() * 2 + 0.5;
+            starSizes[i] = Math.random() * 3 + 1.5;
+            
+            // Slight color variation: blue-white to warm-white
+            const warmth = Math.random();
+            starColors[i * 3] = 0.8 + warmth * 0.2;
+            starColors[i * 3 + 1] = 0.85 + warmth * 0.15;
+            starColors[i * 3 + 2] = 1.0;
         }
         
         starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
         starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
         
         const starMat = new THREE.PointsMaterial({
-            color: 0xffffff,
-            size: 1.5,
+            size: 3.0,
             sizeAttenuation: true,
             transparent: true,
-            opacity: 0.8
+            opacity: 1.0,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
         });
         
         this.starField = new THREE.Points(starGeo, starMat);
@@ -849,47 +819,63 @@ class CityRenderer3D {
     }
     
     createRain() {
-        // 500 rain particles falling vertically
+        // 4000 rain particles — dense downpour visible against dark sky
         const rainGeo = new THREE.BufferGeometry();
-        const rainPositions = new Float32Array(500 * 3);
+        const rainCount = 4000;
+        const rainPositions = new Float32Array(rainCount * 3);
         
-        for (let i = 0; i < 500; i++) {
-            rainPositions[i * 3] = (Math.random() - 0.5) * 200;
-            rainPositions[i * 3 + 1] = Math.random() * 100;
-            rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+        for (let i = 0; i < rainCount; i++) {
+            rainPositions[i * 3] = (Math.random() - 0.5) * 250;
+            rainPositions[i * 3 + 1] = Math.random() * 120;
+            rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 250;
         }
         
         rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
         
         const rainMat = new THREE.PointsMaterial({
-            color: 0xaaaaff,
-            size: 0.5,
+            color: 0x8899cc,
+            size: 1.2,
             sizeAttenuation: true,
             transparent: true,
-            opacity: 0.6
+            opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
         });
         
         this.rainParticles = new THREE.Points(rainGeo, rainMat);
+        this.rainCount = rainCount;
         this.scene.add(this.rainParticles);
     }
     
     createMoon() {
-        // Moon sphere with emissive material
-        const moonGeo = new THREE.SphereGeometry(8, 32, 32);
+        // Moon sphere with emissive glow — large and clearly visible
+        const moonGeo = new THREE.SphereGeometry(12, 32, 32);
         const moonMat = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            transparent: true,
-            opacity: 0.9
+            color: 0xffeedd,
         });
         
         this.moon = new THREE.Mesh(moonGeo, moonMat);
         this.moon.position.set(-60, 120, -40);
         this.scene.add(this.moon);
+        
+        // Moon glow halo
+        const glowGeo = new THREE.SphereGeometry(18, 32, 32);
+        const glowMat = new THREE.MeshBasicMaterial({
+            color: 0xccbbaa,
+            transparent: true,
+            opacity: 0.25,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glow.position.copy(this.moon.position);
+        this.moonGlow = glow;
+        this.scene.add(glow);
     }
     
     createCityHaze() {
-        // Large transparent plane at horizon with gradient (orange/purple)
-        const hazeGeo = new THREE.PlaneGeometry(500, 100);
+        // Large transparent planes at horizon with gradient (orange/purple) — visible city light pollution haze
+        const hazeGeo = new THREE.PlaneGeometry(600, 120);
         
         const canvas = document.createElement('canvas');
         canvas.width = 256;
@@ -897,9 +883,9 @@ class CityRenderer3D {
         const ctx = canvas.getContext('2d');
         
         const gradient = ctx.createLinearGradient(0, 0, 0, 64);
-        gradient.addColorStop(0, 'rgba(255, 140, 50, 0.3)');
-        gradient.addColorStop(0.5, 'rgba(200, 100, 150, 0.2)');
-        gradient.addColorStop(1, 'rgba(100, 50, 150, 0.1)');
+        gradient.addColorStop(0, 'rgba(255, 140, 50, 0.5)');
+        gradient.addColorStop(0.5, 'rgba(200, 100, 150, 0.4)');
+        gradient.addColorStop(1, 'rgba(100, 50, 150, 0.2)');
         
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, 256, 64);
@@ -908,14 +894,33 @@ class CityRenderer3D {
         const hazeMat = new THREE.MeshBasicMaterial({
             map: hazeTexture,
             transparent: true,
-            opacity: 0.4,
+            opacity: 0.7,
             side: THREE.DoubleSide,
-            depthWrite: false
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
         });
         
+        // Front haze
         const haze = new THREE.Mesh(hazeGeo, hazeMat);
         haze.position.set(0, 5, -150);
         this.scene.add(haze);
+        
+        // Back haze (opposite side)
+        const haze2 = new THREE.Mesh(hazeGeo, hazeMat);
+        haze2.position.set(0, 5, 150);
+        haze2.rotation.y = Math.PI;
+        this.scene.add(haze2);
+        
+        // Side hazes
+        const haze3 = new THREE.Mesh(hazeGeo, hazeMat);
+        haze3.position.set(-150, 5, 0);
+        haze3.rotation.y = Math.PI / 2;
+        this.scene.add(haze3);
+        
+        const haze4 = new THREE.Mesh(hazeGeo, hazeMat);
+        haze4.position.set(150, 5, 0);
+        haze4.rotation.y = -Math.PI / 2;
+        this.scene.add(haze4);
     }
     
     updateEntities(entities) {
@@ -1011,10 +1016,11 @@ class CityRenderer3D {
         // Animate rain particles
         if (this.rainParticles) {
             const positions = this.rainParticles.geometry.attributes.position.array;
-            for (let i = 0; i < 500; i++) {
-                positions[i * 3 + 1] -= 0.5;
+            const count = this.rainCount || 4000;
+            for (let i = 0; i < count; i++) {
+                positions[i * 3 + 1] -= 1.5;
                 if (positions[i * 3 + 1] < 0) {
-                    positions[i * 3 + 1] = 100;
+                    positions[i * 3 + 1] = 120;
                 }
             }
             this.rainParticles.geometry.attributes.position.needsUpdate = true;
@@ -1112,6 +1118,11 @@ class CityRenderer3D {
             this.scene.remove(this.moon);
             this.moon.geometry.dispose();
             this.moon.material.dispose();
+        }
+        if (this.moonGlow) {
+            this.scene.remove(this.moonGlow);
+            this.moonGlow.geometry.dispose();
+            this.moonGlow.material.dispose();
         }
         
         // Remove renderer
