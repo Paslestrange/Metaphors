@@ -406,11 +406,9 @@ class CityRenderer3D {
         if (!roots.length) return layout;
         
         // Scale pixel-space coordinates to fit 3D camera view
-        // Camera at (80,80,80) sees ~160 units, so scale to fit ~150 unit world
+        // Camera at (80,80,80) sees ~160 units, so use a 150x120 world
         const WORLD_W = 150;
         const WORLD_D = 120;
-        const sx = WORLD_W / Math.max(W, 1);
-        const sz = WORLD_D / Math.max(H, 1);
         
         // District layout: arrange clusters side by side
         const districtWidth = WORLD_W / Math.max(roots.length, 1);
