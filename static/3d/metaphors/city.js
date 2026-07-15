@@ -31,7 +31,127 @@ class CityMetaphor extends Base3DMetaphor {
         this.objects.set('ground', ground);
 
         // Skybox / ambient
-        this.scene.background = new THREE.Color(0x0a0a1a);
+        this.scene.background = new THREE.Color(0x06061a);
+        this.scene.fog = new THREE.FogExp2(0x0a0820, 0.0015);
+
+        // === ATMOSPHERE EFFECTS ===
+
+        // Sky dome — deep blue to purple gradient
+        var skyGeo = new THREE.SphereGeometry(500, 32, 32);
+        var skyCanvas = document.createElement('canvas');
+        skyCanvas.width = 2;
+        skyCanvas.height = 256;
+        var skyCtx = skyCanvas.getContext('2d');
+        var skyGrad = skyCtx.createLinearGradient(0, 0, 0, 256);
+        skyGrad.addColorStop(0, '#020010');
+        skyGrad.addColorStop(0.3, '#0a0830');
+        skyGrad.addColorStop(0.6, '#120e40');
+        skyGrad.addColorStop(0.8, '#1a1555');
+        skyGrad.addColorStop(1, '#0d0a30');
+        skyCtx.fillStyle = skyGrad;
+        skyCtx.fillRect(0, 0, 2, 256);
+        var skyTex = new THREE.CanvasTexture(skyCanvas);
+        var skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, depthWrite: false });
+        this.objects.set('skyDome', new THREE.Mesh(skyGeo, skyMat));
+        this.scene.add(this.objects.get('skyDome'));
+
+        // Stars — 3000 bright particles with additive blending
+        var starGeo = new THREE.BufferGeometry();
+        var starCount = 3000;
+        var starPos = new Float32Array(starCount * 3);
+        var starSizes = new Float32Array(starCount);
+        var starColors = new Float32Array(starCount * 3);
+        for (var s = 0; s < starCount; s++) {
+            var theta = Math.random() * Math.PI * 2;
+            var phi = Math.random() * Math.PI * 0.4;
+            var r = 350 + Math.random() * 100;
+            starPos[s*3]   = r * Math.sin(phi) * Math.cos(theta);
+            starPos[s*3+1] = r * Math.cos(phi);
+            starPos[s*3+2] = r * Math.sin(phi) * Math.sin(theta);
+            starSizes[s] = Math.random() < 0.1 ? Math.random()*5+4 : Math.random()*2+1;
+            var w = Math.random();
+            starColors[s*3]   = 0.85 + w*0.15;
+            starColors[s*3+1] = 0.9  + w*0.1;
+            starColors[s*3+2] = 1.0;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+        this.objects.set('stars', new THREE.Points(starGeo, new THREE.PointsMaterial({
+            size: 4, sizeAttenuation: true, transparent: true, opacity: 1.0,
+            vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false
+        })));
+        this.scene.add(this.objects.get('stars'));
+
+        // Moon — large sphere with dual glow halo
+        var moonPos = new THREE.Vector3(-50, 80, -40);
+        var moonMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(15, 32, 32),
+            new THREE.MeshBasicMaterial({ color: 0xfff8e0 })
+        );
+        moonMesh.position.copy(moonPos);
+        this.scene.add(moonMesh);
+        this.objects.set('moon', moonMesh);
+
+        var moonGlow = new THREE.Mesh(
+            new THREE.SphereGeometry(25, 32, 32),
+            new THREE.MeshBasicMaterial({ color: 0xfff0cc, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false })
+        );
+        moonGlow.position.copy(moonPos);
+        this.scene.add(moonGlow);
+        this.objects.set('moonGlow', moonGlow);
+
+        var moonOuter = new THREE.Mesh(
+            new THREE.SphereGeometry(40, 32, 32),
+            new THREE.MeshBasicMaterial({ color: 0xeeddcc, transparent: true, opacity: 0.15, blending: THREE.AdditiveBlending, depthWrite: false })
+        );
+        moonOuter.position.copy(moonPos);
+        this.scene.add(moonOuter);
+        this.objects.set('moonOuterGlow', moonOuter);
+
+        // Rain — 8000 particles falling fast
+        var rainGeo = new THREE.BufferGeometry();
+        var rainCount = 8000;
+        var rainPos = new Float32Array(rainCount * 3);
+        for (var r = 0; r < rainCount; r++) {
+            rainPos[r*3]   = (Math.random()-0.5) * 300;
+            rainPos[r*3+1] = Math.random() * 150;
+            rainPos[r*3+2] = (Math.random()-0.5) * 300;
+        }
+        rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+        this.objects.set('rainGeo', rainGeo);
+        this.objects.set('rainCount', rainCount);
+        this.objects.set('rain', new THREE.Points(rainGeo, new THREE.PointsMaterial({
+            color: 0x99aadd, size: 2.5, sizeAttenuation: true, transparent: true, opacity: 0.9,
+            blending: THREE.AdditiveBlending, depthWrite: false
+        })));
+        this.scene.add(this.objects.get('rain'));
+
+        // City haze — 4-sided horizon planes
+        var hazeCanvas = document.createElement('canvas');
+        hazeCanvas.width = 256;
+        hazeCanvas.height = 64;
+        var hCtx = hazeCanvas.getContext('2d');
+        var hGrad = hCtx.createLinearGradient(0, 0, 0, 64);
+        hGrad.addColorStop(0, 'rgba(255,140,50,0.6)');
+        hGrad.addColorStop(0.3, 'rgba(255,100,80,0.45)');
+        hGrad.addColorStop(0.6, 'rgba(180,80,150,0.35)');
+        hGrad.addColorStop(1, 'rgba(80,40,120,0.15)');
+        hCtx.fillStyle = hGrad;
+        hCtx.fillRect(0, 0, 256, 64);
+        var hazeTex = new THREE.CanvasTexture(hazeCanvas);
+        var hazeMat = new THREE.MeshBasicMaterial({
+            map: hazeTex, transparent: true, opacity: 0.8,
+            blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, side: THREE.DoubleSide
+        });
+        var hazeGeo2 = new THREE.PlaneGeometry(700, 150);
+        var h1 = new THREE.Mesh(hazeGeo2, hazeMat); h1.position.set(0, 8, -180);
+        var h2 = new THREE.Mesh(hazeGeo2, hazeMat); h2.position.set(0, 8, 180); h2.rotation.y = Math.PI;
+        var h3 = new THREE.Mesh(hazeGeo2, hazeMat); h3.position.set(-180, 8, 0); h3.rotation.y = Math.PI/2;
+        var h4 = new THREE.Mesh(hazeGeo2, hazeMat); h4.position.set(180, 8, 0); h4.rotation.y = -Math.PI/2;
+        this.scene.add(h1); this.scene.add(h2); this.scene.add(h3); this.scene.add(h4);
+        this.objects.set('haze1', h1); this.objects.set('haze2', h2);
+        this.objects.set('haze3', h3); this.objects.set('haze4', h4);
 
         // Lighting - cyberpunk city
         const ambientLight = new THREE.AmbientLight(0x222244, 0.5);
@@ -107,6 +227,20 @@ class CityMetaphor extends Base3DMetaphor {
 
     update(deltaTime, entities) {
         const now = performance.now() / 1000 - this.startTime;
+        
+        // Animate rain
+        const rain = this.objects.get('rain');
+        if (rain) {
+            const positions = rain.geometry.attributes.position.array;
+            const count = this.objects.get('rainCount') || 8000;
+            for (let i = 0; i < count; i++) {
+                positions[i * 3 + 1] -= 2.0;
+                if (positions[i * 3 + 1] < 0) {
+                    positions[i * 3 + 1] = 150;
+                }
+            }
+            rain.geometry.attributes.position.needsUpdate = true;
+        }
         
         // Animate critical buildings (pulse)
         this.buildings.forEach(b => {
