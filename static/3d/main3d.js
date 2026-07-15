@@ -80,9 +80,6 @@
 
     function initMetaphorInstances() {
         if (window.CityMetaphor) metaphorInstances.city = new window.CityMetaphor();
-        if (window.SolarMetaphor) metaphorInstances.solar = new window.SolarMetaphor();
-        if (window.ForestMetaphor) metaphorInstances.forest = new window.ForestMetaphor();
-        if (window.TrafficLightMetaphor) metaphorInstances.traffic_light = new window.TrafficLightMetaphor();
         if (window.SpaceMetaphor) metaphorInstances.space = new window.SpaceMetaphor();
         if (window.GardenMetaphor) metaphorInstances.garden = new window.GardenMetaphor();
     }

@@ -8,6 +8,7 @@ import json
 from engine.scheduler import EntityScheduler
 from engine.sources.mock import MockSource
 from engine.sources.processes import ProcessSource
+from engine.sources.docker import DockerSource
 from engine.metaphors import MetaphorRegistry
 from engine.metaphors.city import CityRenderer
 from engine.metaphors.traffic_light import TrafficLightRenderer
@@ -22,7 +23,7 @@ registry.register("traffic_light", TrafficLightRenderer())
 active_metaphor = "city"
 
 # Scheduler with both mock and live process sources
-scheduler = EntityScheduler(sources=[MockSource(), ProcessSource()], interval_sec=3.0)
+scheduler = EntityScheduler(sources=[MockSource(), ProcessSource(), DockerSource()], interval_sec=3.0)
 
 
 @app.get("/")

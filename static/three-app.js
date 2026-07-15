@@ -142,6 +142,33 @@ class CityRenderer3D {
 
         canvas.addEventListener('mousemove', this._onMouseMove);
         canvas.addEventListener('mouseleave', this._onMouseLeave);
+
+        // Click handler — populate entity detail panel
+        this._onClick = (event) => {
+            const rect = canvas.getBoundingClientRect();
+            this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+
+            const meshes = Array.from(this.buildings.values());
+            const intersects = this.raycaster.intersectObjects(meshes, false);
+
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+                const entity = hitMesh.userData.entity;
+                if (entity && typeof window.showDetailPanel === 'function') {
+                    window.showDetailPanel(entity);
+                }
+            } else {
+                // Clicked empty space — close panel
+                if (typeof window.hideDetailPanel === 'function') {
+                    window.hideDetailPanel();
+                }
+            }
+        };
+
+        canvas.addEventListener('click', this._onClick);
     }
 
     _hover(mesh) {
@@ -566,25 +593,39 @@ class CityRenderer3D {
         } else if (type === 'service') {
             // Service = building with windows
             geometry = new THREE.BoxGeometry(pos.w, pos.h, pos.d);
+            
+            // Generate window texture based on state for emissive map
+            const windowData = this.createWindowTexture(pos, state);
+            
+            // Wall color: dark but slightly tinted by state
+            const wallTint = this.mixColor(this.WALL_COLOR, color, 0.15);
             material = new THREE.MeshStandardMaterial({
-                color: this.WALL_COLOR,
+                color: wallTint,
                 roughness: 0.7,
                 metalness: 0.3,
-                emissive: color,
-                emissiveIntensity: 0.2
+                emissiveMap: windowData.texture,
+                emissive: new THREE.Color(windowData.litColor),
+                emissiveIntensity: state === 'stopped' ? 0.05 : 0.6
             });
             mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(pos.x + pos.w / 2, pos.y, pos.z + pos.d / 2);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            mesh.userData = { entity: entity };
+            mesh.userData = { entity: entity, windowData: windowData };
             this.scene.add(mesh);
             
-            // Add windows
-            this.addWindows(mesh, pos, color);
+            // Neon edge outline showing state color
+            const edgesGeo = new THREE.EdgesGeometry(geometry);
+            const edgesMat = new THREE.LineBasicMaterial({ color: color, linewidth: 1 });
+            const edgesMesh = new THREE.LineSegments(edgesGeo, edgesMat);
+            mesh.add(edgesMesh);
+            mesh.userData.edgesMesh = edgesMesh;
             
-            // Rooftop details on 30% of buildings
-            if (Math.random() < 0.3 && pos.w > 10) {
+            // Add entrance on ground floor
+            this.addEntrance(mesh, pos);
+            
+            // Rooftop details on tall buildings (height > 8)
+            if (Math.random() < 0.4 && pos.h > 8) {
                 this.addRooftopDetails(mesh, pos);
             }
             
