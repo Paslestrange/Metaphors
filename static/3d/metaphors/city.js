@@ -55,7 +55,7 @@ class CityMetaphor extends Base3DMetaphor {
         this.objects.set('skyDome', new THREE.Mesh(skyGeo, skyMat));
         this.scene.add(this.objects.get('skyDome'));
 
-        // Stars — 3000 bright particles with additive blending
+        // Stars — 3000 particles, natural star sizes
         var starGeo = new THREE.BufferGeometry();
         var starCount = 3000;
         var starPos = new Float32Array(starCount * 3);
@@ -68,7 +68,8 @@ class CityMetaphor extends Base3DMetaphor {
             starPos[s*3]   = r * Math.sin(phi) * Math.cos(theta);
             starPos[s*3+1] = r * Math.cos(phi);
             starPos[s*3+2] = r * Math.sin(phi) * Math.sin(theta);
-            starSizes[s] = Math.random() < 0.1 ? Math.random()*5+4 : Math.random()*2+1;
+            // Mix of dim and bright stars
+            starSizes[s] = Math.random() < 0.05 ? Math.random()*1.5+1.5 : Math.random()*0.8+0.3;
             var w = Math.random();
             starColors[s*3]   = 0.85 + w*0.15;
             starColors[s*3+1] = 0.9  + w*0.1;
@@ -78,8 +79,8 @@ class CityMetaphor extends Base3DMetaphor {
         starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
         starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
         this.objects.set('stars', new THREE.Points(starGeo, new THREE.PointsMaterial({
-            size: 4, sizeAttenuation: true, transparent: true, opacity: 1.0,
-            vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false
+            size: 1.5, sizeAttenuation: true, transparent: true, opacity: 1.0,
+            vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false
         })));
         this.scene.add(this.objects.get('stars'));
 
@@ -109,7 +110,7 @@ class CityMetaphor extends Base3DMetaphor {
         this.scene.add(moonOuter);
         this.objects.set('moonOuterGlow', moonOuter);
 
-        // Rain — 8000 particles falling fast
+        // Rain — 8000 particles, thin streaks
         var rainGeo = new THREE.BufferGeometry();
         var rainCount = 8000;
         var rainPos = new Float32Array(rainCount * 3);
@@ -122,7 +123,7 @@ class CityMetaphor extends Base3DMetaphor {
         this.objects.set('rainGeo', rainGeo);
         this.objects.set('rainCount', rainCount);
         this.objects.set('rain', new THREE.Points(rainGeo, new THREE.PointsMaterial({
-            color: 0x99aadd, size: 2.5, sizeAttenuation: true, transparent: true, opacity: 0.9,
+            color: 0x99aadd, size: 0.6, sizeAttenuation: true, transparent: true, opacity: 0.7,
             blending: THREE.AdditiveBlending, depthWrite: false
         })));
         this.scene.add(this.objects.get('rain'));
