@@ -19,6 +19,11 @@ import os
 import time
 import re
 from pathlib import Path
+try:
+    from PIL import Image, ImageStat
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 WORKSPACE = Path("/home/pascal/workspace/Metaphors")
 LOCK_FILE = WORKSPACE / ".worker.lock"
@@ -250,6 +255,67 @@ def git_diff_main_names():
     names, _, _ = run(f"git diff {BRANCH}...HEAD --name-only", workdir=WORKSPACE)
     return [f.strip() for f in names.splitlines() if f.strip()]
 
+# ─── Screenshot Verification ───────────────────────────────────────
+
+def verify_screenshot(path) -> bool:
+    """Verify screenshot is not blank/broken.
+    
+    Returns True if:
+    - Image exists and loads
+    - Has pixel variance > threshold (not blank)
+    - Not all one color
+    
+    Returns False if:
+    - PIL not available
+    - File doesn't exist
+    - Can't load image
+    - Image is blank/broken
+    """
+    if not PIL_AVAILABLE:
+        log("PIL not available, skipping screenshot verification")
+        return False
+    
+    if not Path(path).exists():
+        log(f"Screenshot not found: {path}")
+        return False
+    
+    try:
+        img = Image.open(path)
+        img.load()
+        
+        # Convert to RGB if needed
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Check image dimensions
+        if img.width < 10 or img.height < 10:
+            log(f"Screenshot too small: {img.width}x{img.height}")
+            return False
+        
+        # Get statistics
+        stat = ImageStat.Stat(img)
+        
+        # Check variance (standard deviation) for each channel
+        # If all channels have very low variance, image is blank
+        min_variance = 5.0  # Threshold for "not blank"
+        max_variance = max(stat.var) if stat.var else 0
+        
+        if max_variance < min_variance:
+            log(f"Screenshot appears blank (max variance: {max_variance:.2f})")
+            return False
+        
+        # Check if all pixels are the same color
+        if all(abs(v - stat.mean[i]) < 1.0 for i, v in enumerate(stat.median)):
+            log("Screenshot is solid color")
+            return False
+        
+        log(f"Screenshot verified: variance={max_variance:.2f}, mean={stat.mean}")
+        return True
+        
+    except Exception as e:
+        log(f"Screenshot verification failed: {e}")
+        return False
+
 # ─── App Status ────────────────────────────────────────────────────
 
 def check_service_running():
@@ -454,7 +520,28 @@ def main():
 
     # Capture screenshot for visual verification
     screenshot_path = WORKSPACE / "screenshots" / f"shipped_{re.sub(r'[^a-zA-Z0-9]', '_', title)[:40]}.png"
+    screenshot_dir = screenshot_path.parent
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
     run(f"python3 scripts/screenshot.py --output {screenshot_path} --wait 4", workdir=WORKSPACE, timeout=30)
+
+    # Verify screenshot quality
+    screenshot_ok = verify_screenshot(str(screenshot_path))
+    if not screenshot_ok:
+        log(f"Screenshot verification FAILED for: {title}")
+        # Block the task instead of completing — screenshot looks broken
+        run(f'{HERMES_BIN} kanban block {task_id} --reason "Screenshot verification failed: image appears blank/broken"', workdir=WORKSPACE)
+        # Still notify discord about the issue
+        files = git_diff_main_names()
+        version = get_app_version()
+        msg = f"**⚠️ Blocked: {title}**\n\n"
+        msg += f"Screenshot verification failed — image appears blank or broken.\n"
+        msg += f"Screenshot: `{screenshot_path}`\n"
+        msg += f"**Files:** {', '.join(f'`{f}`' for f in files[:5])}\n"
+        msg += f"**Version:** `{version}`\n"
+        msg += f"Task blocked for manual review."
+        print(json.dumps({"type": "blocked_screenshot", "message": msg}))
+        release_lock()
+        return
 
     # Restart service to pick up changes
     restarted = restart_service()
@@ -481,6 +568,7 @@ def main():
         msg += f"\n\n**App live** on port {APP_PORT} — version `{version}`"
         msg += f"\nhttp://localhost:{APP_PORT}"
         msg += f"\nhttp://192.168.195.192:{APP_PORT} (ZeroTier)"
+        msg += f"\n**Screenshot:** `{screenshot_path}`"
     else:
         msg += f"\n\n**Service restart failed** — check: journalctl --user -u {SERVICE_NAME}"
     log(f"Shipped: {title}")
