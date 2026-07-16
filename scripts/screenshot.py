@@ -8,9 +8,20 @@ Usage:
     python3 scripts/screenshot.py --output /tmp/city.png
     python3 scripts/screenshot.py --metaphor space    # Switch metaphor first
 """
+import os
+import sys
+
+# Auto-re-exec with the project venv Python if playwright isn't available
+_VENV_PY = "/home/pascal/workspace/Metaphors/.venv/bin/python3"
+try:
+    import playwright  # noqa: F401
+except ImportError:
+    if os.path.isfile(_VENV_PY) and os.path.abspath(sys.executable) != os.path.abspath(_VENV_PY):
+        os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
+    raise
+
 import argparse
 import asyncio
-import sys
 from pathlib import Path
 
 WORKSPACE = Path("/home/pascal/workspace/Metaphors")
