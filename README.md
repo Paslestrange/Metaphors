@@ -13,7 +13,7 @@ See your infrastructure the way your brain wants to — not as rows in a table, 
 
 ## Features
 
-- **9 visual metaphors** — city, space station, factory, kitchen, construction site, solar system, orchestra, naval ship, garden
+- **6 visual metaphors** — city, space station, factory, kitchen, construction site, garden
 - **Real-time updates** — WebSocket-driven, ≤3s refresh cycle
 - **Pluggable architecture** — add custom metaphors or data sources by implementing a base class
 - **Interactive** — hover for tooltips, click for detail panel, minimap navigation
@@ -125,10 +125,7 @@ metaphors/
 │       ├── factory.py     # 🏭 Assembly line factory
 │       ├── kitchen.py     # 🍳 Restaurant kitchen
 │       ├── construction.py# 🏗️ Blueprint construction site
-│       ├── solar.py       # 🪐 Orbital solar system
-│       ├── orchestra.py   # 🎻 Concert hall orchestra
-│       ├── ship.py        # 🚢 Naval warship cross-section
-│       └── garden.py      # 🌱 Organic garden ecosystem
+│       ├── garden.py      # 🌱 Organic garden ecosystem
 ├── static/                # Frontend (vanilla JS + Canvas)
 │   ├── index.html
 │   ├── main.js

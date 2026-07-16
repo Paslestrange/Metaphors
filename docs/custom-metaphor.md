@@ -622,7 +622,7 @@ Also add a description in the `descriptions` dict inside `list_metaphors()`:
 ```python
 descriptions = {
     "city": "Infrastructure as a cityscape",
-    "solar": "Systems as orbiting celestial bodies",
+    "garden": "Infrastructure as a living garden ecosystem",
     "forest": "Services as a living forest ecosystem",
     "traffic_light": "Infrastructure as traffic signals at an intersection",  # <-- ADD
 }

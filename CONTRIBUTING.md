@@ -1,6 +1,6 @@
 # Contributing to Metaphors
 
-Thanks for your interest in contributing! Metaphors is an infrastructure visualizer that renders your systems through creative metaphors — a city skyline, a solar system, a naval ship, a garden. This guide explains how to extend it with your own metaphors and data sources.
+Thanks for your interest in contributing! Metaphors is an infrastructure visualizer that renders your systems through creative metaphors — a city skyline, a space station, a garden. This guide explains how to extend it with your own metaphors and data sources.
 
 ---
 

@@ -80,7 +80,6 @@
 
     function initMetaphorInstances() {
         if (window.CityMetaphor) metaphorInstances.city = new window.CityMetaphor();
-        if (window.SolarMetaphor) metaphorInstances.solar = new window.SolarMetaphor();
         if (window.ForestMetaphor) metaphorInstances.forest = new window.ForestMetaphor();
         if (window.TrafficLightMetaphor) metaphorInstances.traffic_light = new window.TrafficLightMetaphor();
         if (window.SpaceMetaphor) metaphorInstances.space = new window.SpaceMetaphor();
@@ -109,7 +108,6 @@
             console.error('Failed to fetch metaphors:', e);
             availableMetaphors = [
                 { id: 'city', name: 'City', description: 'Infrastructure as a 3D cityscape' },
-                { id: 'solar', name: 'Solar', description: 'Systems as orbiting celestial bodies' },
                 { id: 'forest', name: 'Forest', description: 'Services as a 3D forest ecosystem' },
                 { id: 'traffic_light', name: 'Traffic Light', description: 'Urban intersection with signal colors' },
                 { id: 'space', name: 'Space Station', description: 'Orbital station in deep space' },
