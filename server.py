@@ -13,6 +13,12 @@ from engine.metaphors import MetaphorRegistry
 from engine.metaphors.city import CityRenderer
 from engine.metaphors.space import SpaceStationRenderer
 from engine.metaphors.garden import GardenRenderer
+from engine.metaphors.kitchen import KitchenRenderer
+from engine.metaphors.factory import FactoryRenderer
+from engine.metaphors.construction import ConstructionRenderer
+from engine.metaphors.ship import ShipRenderer
+from engine.metaphors.orchestra import OrchestraRenderer
+from engine.metaphors.solar import SolarRenderer
 
 app = FastAPI(title="Metaphors", version="0.1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -22,6 +28,12 @@ registry = MetaphorRegistry()
 registry.register("city", CityRenderer())
 registry.register("space", SpaceStationRenderer())
 registry.register("garden", GardenRenderer())
+registry.register("kitchen", KitchenRenderer())
+registry.register("factory", FactoryRenderer())
+registry.register("construction", ConstructionRenderer())
+registry.register("ship", ShipRenderer())
+registry.register("orchestra", OrchestraRenderer())
+registry.register("solar", SolarRenderer())
 active_metaphor = "city"
 
 # Scheduler with both mock and live process sources
@@ -55,6 +67,11 @@ async def list_metaphors():
         "city": "Infrastructure as a cityscape",
         "space": "Systems as a space station with orbiting modules",
         "garden": "Infrastructure as a garden with plants, terrain, and lighting",
+        "kitchen": "Infrastructure as a kitchen with appliances, prep stations, and cooking",
+        "factory": "Infrastructure as a factory with conveyor belts, robot arms, and assembly lines",
+        "construction": "Infrastructure as a construction site with cranes, scaffolding, and workers",
+        "ship": "Infrastructure as a ship with decks, crew stations, and cargo holds",
+        "orchestra": "Infrastructure as an orchestra with instrument sections and musicians",
     }
     for name in names:
         metaphor_info.append({
