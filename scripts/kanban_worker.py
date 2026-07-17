@@ -18,6 +18,7 @@ import sys
 import os
 import time
 import re
+import urllib.request
 from pathlib import Path
 try:
     from PIL import Image, ImageStat
@@ -27,6 +28,10 @@ except ImportError:
 
 WORKSPACE = Path("/home/pascal/workspace/Metaphors")
 LOCK_FILE = WORKSPACE / ".worker.lock"
+# Shared lock across all autonomous workers (Metaphors, PetitionsRadar, etc.)
+# Prevents concurrent agy/hermes sessions from different projects
+SHARED_LOCK_FILE = Path("/home/pascal/workspace/.autonomous-worker.lock")
+SHARED_LOCK_TIMEOUT = 900  # 15 min — if a worker dies, another can claim after this
 REMOTE = "origin"
 BRANCH = "main"
 AGY_BIN = "/home/pascal/.local/bin/agy"
@@ -35,6 +40,7 @@ TIMEOUT = 600
 MAX_FIX_ROUNDS = 2
 APP_PORT = 8080
 SERVICE_NAME = "metaphors.service"
+DISCORD_CHANNEL_ID = "1525810707449249833"  # #metaphors
 
 # ─── Helpers ───────────────────────────────────────────────────────
 
@@ -50,6 +56,37 @@ def log(msg):
 
 def _sq(s):
     return s.replace("'", "'\\''")
+
+def send_discord(message: str) -> bool:
+    """Send a message directly to Discord via bot API — no LLM needed."""
+    env_path = Path("/home/pascal/.hermes/.env")
+    if not env_path.exists():
+        log("No .env file found, cannot send Discord message")
+        return False
+    token = None
+    for line in env_path.read_text().splitlines():
+        if line.startswith("DISCORD_BOT_TOKEN="):
+            token = line.split("=", 1)[1].strip()
+            break
+    if not token:
+        log("No DISCORD_BOT_TOKEN found")
+        return False
+    try:
+        payload = json.dumps({"content": message}).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://discord.com/api/v10/channels/{DISCORD_CHANNEL_ID}/messages",
+            data=payload,
+            headers={
+                "Authorization": f"Bot {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200 or resp.status == 201
+    except Exception as e:
+        log(f"Discord send failed: {e}")
+        return False
 
 # ─── Project Scanner ───────────────────────────────────────────────
 
@@ -443,6 +480,7 @@ def release_lock():
 def main():
     log("Autonomous worker starting")
     if not acquire_lock():
+        print("[SILENT]")
         return
 
     # Scan
@@ -457,11 +495,13 @@ def main():
         if scanner.has_critical_gaps():
             # Gaps exist but tasks are running — don't spam discord
             log(f"Gaps exist but no ready tasks. Tests: {scanner.test_summary}")
+            print("[SILENT]")  # No LLM needed
+            release_lock()
             return  # Silent — tasks are in progress
 
-        # Truly idle — notify discord
+        # Truly idle — send Discord directly, no LLM needed
+        version = get_app_version()
         if check_app_running():
-            version = get_app_version()
             msg = f"🤖 **Metaphors worker idle.**\n\n"
             msg += f"App running on port {APP_PORT} — version `{version}`\n"
             msg += f"Tests: {scanner.test_summary or 'all passing'}\n"
@@ -472,7 +512,8 @@ def main():
             msg += f"App not running. Tests: {scanner.test_summary or 'all passing'}\n"
             msg += f"Missing files: {len(scanner.missing)}\n\n"
             msg += f"Nothing to do."
-        print(json.dumps({"type": "idle", "message": msg}))
+        send_discord(msg)
+        print("[SILENT]")  # Already sent to Discord
         release_lock()
         return
 
@@ -495,11 +536,15 @@ def main():
     plan = plan_task(task)
     if not plan:
         run(f"git checkout {BRANCH} && git branch -D {branch}", workdir=WORKSPACE)
+        print("[SILENT]")
+        release_lock()
         return
 
     impl = implement_task(task, plan)
     if not impl["success"]:
         run(f"git checkout {BRANCH} && git branch -D {branch}", workdir=WORKSPACE)
+        print("[SILENT]")
+        release_lock()
         return
 
     review_round = 0
@@ -510,10 +555,14 @@ def main():
             break
         if not fix_task(task, review["summary"]):
             run(f"git checkout {BRANCH} && git branch -D {branch}", workdir=WORKSPACE)
+            print("[SILENT]")
+            release_lock()
             return
 
     merged = git_merge_branch(branch, title)
     if not merged:
+        print("[SILENT]")
+        release_lock()
         return
 
     pushed = git_push()
@@ -530,7 +579,7 @@ def main():
         log(f"Screenshot verification FAILED for: {title}")
         # Block the task instead of completing — screenshot looks broken
         run(f'{HERMES_BIN} kanban block {task_id} --reason "Screenshot verification failed: image appears blank/broken"', workdir=WORKSPACE)
-        # Still notify discord about the issue
+        # Send Discord directly, no LLM needed
         files = git_diff_main_names()
         version = get_app_version()
         msg = f"**⚠️ Blocked: {title}**\n\n"
@@ -539,7 +588,8 @@ def main():
         msg += f"**Files:** {', '.join(f'`{f}`' for f in files[:5])}\n"
         msg += f"**Version:** `{version}`\n"
         msg += f"Task blocked for manual review."
-        print(json.dumps({"type": "blocked_screenshot", "message": msg}))
+        send_discord(msg)
+        print("[SILENT]")
         release_lock()
         return
 
@@ -552,7 +602,7 @@ def main():
         git_rollback()
         app_running = check_service_running()
 
-    # Build notification
+    # Build notification and send DIRECTLY to Discord (no LLM cron agent needed)
     files = git_diff_main_names()
     version = get_app_version()
 
@@ -572,7 +622,8 @@ def main():
     else:
         msg += f"\n\n**Service restart failed** — check: journalctl --user -u {SERVICE_NAME}"
     log(f"Shipped: {title}")
-    print(json.dumps({"type": "shipped", "message": msg}))
+    send_discord(msg)
+    print("[SILENT]")  # Already sent to Discord
     release_lock()
 
 
