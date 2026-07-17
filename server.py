@@ -9,16 +9,12 @@ from engine.scheduler import EntityScheduler
 from engine.sources.mock import MockSource
 from engine.sources.processes import ProcessSource
 from engine.sources.docker import DockerSource
+from engine.sources.prometheus import PrometheusSource
 from engine.metaphors import MetaphorRegistry
 from engine.metaphors.city import CityRenderer
 from engine.metaphors.space import SpaceStationRenderer
 from engine.metaphors.garden import GardenRenderer
-from engine.metaphors.kitchen import KitchenRenderer
-from engine.metaphors.factory import FactoryRenderer
-from engine.metaphors.construction import ConstructionRenderer
-from engine.metaphors.ship import ShipRenderer
-from engine.metaphors.orchestra import OrchestraRenderer
-from engine.metaphors.solar import SolarRenderer
+
 
 app = FastAPI(title="Metaphors", version="0.1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -28,16 +24,11 @@ registry = MetaphorRegistry()
 registry.register("city", CityRenderer())
 registry.register("space", SpaceStationRenderer())
 registry.register("garden", GardenRenderer())
-registry.register("kitchen", KitchenRenderer())
-registry.register("factory", FactoryRenderer())
-registry.register("construction", ConstructionRenderer())
-registry.register("ship", ShipRenderer())
-registry.register("orchestra", OrchestraRenderer())
-registry.register("solar", SolarRenderer())
+
 active_metaphor = "city"
 
 # Scheduler with both mock and live process sources
-scheduler = EntityScheduler(sources=[MockSource(), ProcessSource(), DockerSource()], interval_sec=3.0)
+scheduler = EntityScheduler(sources=[MockSource(), ProcessSource(), DockerSource(), PrometheusSource()], interval_sec=3.0)
 
 
 @app.get("/")
