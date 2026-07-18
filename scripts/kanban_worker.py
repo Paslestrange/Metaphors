@@ -381,7 +381,7 @@ def get_next_task():
     except json.JSONDecodeError:
         return None
     for t in tasks:
-        if t.get("state") == "ready":
+        if t.get("status") == "ready":
             return t
     return None
 
