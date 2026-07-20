@@ -22,3 +22,10 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/metaphors/metaphors"
 Repository = "https://github.com/metaphors/metaphors"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools]
+packages = ["engine", "tests"]

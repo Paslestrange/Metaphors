@@ -1,9 +1,11 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 import uvicorn
 import asyncio
 import json
+import subprocess
+import shutil
 
 from engine.scheduler import EntityScheduler
 from engine.sources.mock import MockSource
@@ -95,6 +97,81 @@ async def get_metaphor(name: str):
     if hasattr(renderer, "config"):
         return renderer.config()
     return {"name": name}
+
+
+# --- Logs API ---
+
+@app.get("/api/logs/docker/{container_id}")
+async def docker_logs(container_id: str, tail: int = Query(default=100, ge=1, le=1000)):
+    """Fetch recent logs from a Docker container."""
+    docker = shutil.which("docker")
+    if docker is None:
+        return JSONResponse(status_code=503, content={"error": "docker not available"})
+    try:
+        result = subprocess.run(
+            [docker, "logs", "--tail", str(tail), container_id],
+            capture_output=True, text=True, timeout=5.0,
+        )
+        logs = result.stdout or result.stderr or "(no output)"
+        return {"container_id": container_id, "logs": logs}
+    except subprocess.TimeoutExpired:
+        return JSONResponse(status_code=504, content={"error": "docker logs timed out"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/logs/process")
+async def process_logs(name: str = Query(...), lines: int = Query(default=50, ge=1, le=500)):
+    """Fetch recent syslog/journal entries for a process name."""
+    journalctl = shutil.which("journalctl")
+    if journalctl:
+        try:
+            result = subprocess.run(
+                [journalctl, "--no-pager", "-n", str(lines), "-t", name],
+                capture_output=True, text=True, timeout=5.0,
+            )
+            logs = result.stdout or "(no journal entries)"
+            return {"process": name, "logs": logs, "source": "journalctl"}
+        except subprocess.TimeoutExpired:
+            return JSONResponse(status_code=504, content={"error": "journalctl timed out"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+    # Fallback: search dmesg
+    dmesg = shutil.which("dmesg")
+    if dmesg:
+        try:
+            result = subprocess.run(
+                ["dmesg", "--level=info,warn,err", "-T"],
+                capture_output=True, text=True, timeout=5.0,
+            )
+            matching = [l for l in result.stdout.splitlines() if name.lower() in l.lower()][-lines:]
+            logs = "\n".join(matching) if matching else f"(no dmesg entries for '{name}')"
+            return {"process": name, "logs": logs, "source": "dmesg"}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+    return JSONResponse(status_code=503, content={"error": "no log source available"})
+
+
+@app.get("/api/logs/prometheus")
+async def prometheus_logs(instance: str = Query(default="")):
+    """Fetch alert/rule info for a Prometheus-monitored instance."""
+    # Prometheus itself doesn't expose system logs — return recent alert state
+    prom = None
+    for src in scheduler.sources:
+        if src.name == "prometheus":
+            prom = src
+            break
+    if prom is None:
+        return JSONResponse(status_code=503, content={"error": "prometheus source not configured"})
+    try:
+        from engine.sources.prometheus import PrometheusSource
+        if not isinstance(prom, PrometheusSource):
+            return JSONResponse(status_code=503, content={"error": "prometheus source not configured"})
+        alerts = prom._get_alerts()
+        instance_alerts = {k: v for k, v in alerts.items() if not instance or k == instance}
+        return {"instance": instance, "alerts": instance_alerts, "source": "prometheus"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # --- WebSocket ---
