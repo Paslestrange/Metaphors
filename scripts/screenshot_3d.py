@@ -7,7 +7,7 @@ WORKSPACE = Path("/home/pascal/workspace/Metaphors")
 SCREENSHOTS_DIR = WORKSPACE / "screenshots"
 URL = "http://localhost:8080/3d"
 
-METAPHORS = ['city', 'solar', 'forest', 'traffic_light', 'space']
+METAPHORS = ['city', 'forest', 'traffic_light', 'space']
 
 
 async def capture_all():
