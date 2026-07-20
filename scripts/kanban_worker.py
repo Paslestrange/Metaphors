@@ -117,7 +117,6 @@ class ProjectScanner:
         "engine/metaphors/garden.py": "Garden metaphor",
         "engine/metaphors/kitchen.py": "Kitchen metaphor",
         "engine/metaphors/ship.py": "Ship metaphor",
-        "engine/metaphors/solar.py": "Solar metaphor",
         "engine/metaphors/orchestra.py": "Orchestra metaphor",
         "engine/metaphors/construction.py": "Construction metaphor",
         "static/index.html": "Frontend HTML",

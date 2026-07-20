@@ -27,24 +27,24 @@ class CityMetaphor extends Base3DMetaphor {
     }
 
     getDefaultCameraPosition() {
-        return { x: 0, y: 50, z: 90 };
+        return { x: 35, y: 28, z: 65 };
     }
 
     getDefaultCameraTarget() {
-        return { x: 0, y: 8, z: 0 };
+        return { x: 0, y: 6, z: 0 };
     }
 
     getStateColor(state) {
         const colors = {
-            healthy:  0x22c55e,  // green
-            running:  0x3b82f6,  // blue
-            idle:     0x9ca3af,  // gray
-            warning:  0xf59e0b,  // amber/yellow
-            degraded: 0xf97316,  // orange
-            critical: 0xef4444,  // red
-            stopped:  0x6b7280,  // dark gray
-            pending:  0xa78bfa,  // purple
-            scaling:  0x06b6d4,  // cyan
+            healthy:  0x22c55e,
+            running:  0x3b82f6,
+            idle:     0x9ca3af,
+            warning:  0xf59e0b,
+            degraded: 0xf97316,
+            critical: 0xef4444,
+            stopped:  0x6b7280,
+            pending:  0xa78bfa,
+            scaling:  0x06b6d4,
             unknown:  0x6b7280
         };
         return colors[state] || colors.unknown;
@@ -56,7 +56,7 @@ class CityMetaphor extends Base3DMetaphor {
             running:  '#3b82f6',
             idle:     '#9ca3af',
             warning:  '#f59e0b',
-            degraded: '#f97316',
+            degraded: '#f99316',
             critical: '#ef4444',
             stopped:  '#6b7280',
             pending:  '#a78bfa',
@@ -66,88 +66,91 @@ class CityMetaphor extends Base3DMetaphor {
         return colors[state] || colors.unknown;
     }
 
-    // Generate a window texture on canvas
-    _makeWindowTexture(stateColor, width, height, style) {
+    // Generate a window texture — brighter, more visible windows
+    _makeWindowTexture(stateColor, stateColorInt, width, height, style) {
         var canvas = document.createElement('canvas');
         canvas.width = 128;
         canvas.height = 256;
         var ctx = canvas.getContext('2d');
 
-        // Wall color — dark with slight variation
-        var wallShades = ['#1a1a2e', '#1c1c30', '#181828', '#1e1e34'];
-        ctx.fillStyle = wallShades[this._randInt(0, wallShades.length - 1)];
+        // Wall color — dark but with state color tint
+        var r = (stateColorInt >> 16) & 0xff;
+        var g = (stateColorInt >> 8) & 0xff;
+        var b = stateColorInt & 0xff;
+        // Tint wall with 15% state color
+        var wallR = Math.floor(20 + r * 0.15);
+        var wallG = Math.floor(20 + g * 0.15);
+        var wallB = Math.floor(25 + b * 0.15);
+        ctx.fillStyle = 'rgb(' + wallR + ',' + wallG + ',' + wallB + ')';
         ctx.fillRect(0, 0, 128, 256);
 
         // Window grid
-        var windowColor = stateColor;
         var windowRows, windowCols, windowW, windowH, gapX, gapY;
 
         if (style === 'grid') {
-            windowRows = this._randInt(6, 12);
-            windowCols = this._randInt(3, 6);
-            windowW = Math.floor(100 / windowCols);
-            windowH = Math.floor(200 / windowRows);
+            windowRows = this._randInt(8, 16);
+            windowCols = this._randInt(4, 8);
+            windowW = Math.floor(110 / windowCols);
+            windowH = Math.floor(220 / windowRows);
             gapX = Math.floor((128 - windowCols * windowW) / (windowCols + 1));
             gapY = Math.floor((256 - windowRows * windowH) / (windowRows + 1));
 
-            for (var r = 0; r < windowRows; r++) {
-                for (var c = 0; c < windowCols; c++) {
-                    var lit = this._random() < 0.6;
+            for (var row = 0; row < windowRows; row++) {
+                for (var col = 0; col < windowCols; col++) {
+                    var lit = this._random() < 0.7;
                     if (lit) {
-                        ctx.fillStyle = windowColor;
-                        ctx.globalAlpha = 0.4 + this._random() * 0.5;
+                        ctx.fillStyle = stateColor;
+                        ctx.globalAlpha = 0.5 + this._random() * 0.5;
                     } else {
-                        ctx.fillStyle = '#0a0a15';
-                        ctx.globalAlpha = 0.8;
+                        ctx.fillStyle = '#080810';
+                        ctx.globalAlpha = 0.9;
                     }
-                    var wx = gapX + c * (windowW + gapX);
-                    var wy = gapY + r * (windowH + gapY);
-                    ctx.fillRect(wx, wy, windowW - 2, windowH - 2);
+                    var wx = gapX + col * (windowW + gapX);
+                    var wy = gapY + row * (windowH + gapY);
+                    ctx.fillRect(wx, wy, windowW - 1, windowH - 1);
                 }
             }
         } else if (style === 'stripes') {
-            // Horizontal window bands
-            var numBands = this._randInt(4, 8);
-            var bandH = Math.floor(200 / numBands);
-            for (var b = 0; b < numBands; b++) {
-                var by = 20 + b * (bandH + 8);
-                ctx.fillStyle = windowColor;
-                ctx.globalAlpha = 0.3 + this._random() * 0.4;
-                ctx.fillRect(8, by, 112, bandH - 4);
-                // Window divisions within band
-                ctx.fillStyle = '#1a1a2e';
+            var numBands = this._randInt(5, 10);
+            var bandH = Math.floor(220 / numBands);
+            for (var band = 0; band < numBands; band++) {
+                var by = 15 + band * (bandH + 5);
+                ctx.fillStyle = stateColor;
+                ctx.globalAlpha = 0.35 + this._random() * 0.35;
+                ctx.fillRect(6, by, 116, bandH - 3);
+                // Divisions
+                ctx.fillStyle = 'rgb(' + wallR + ',' + wallG + ',' + wallB + ')';
                 ctx.globalAlpha = 1.0;
-                var divs = this._randInt(2, 5);
+                var divs = this._randInt(3, 6);
                 for (var d = 0; d < divs; d++) {
-                    var dx = 8 + Math.floor((d + 1) * 112 / (divs + 1));
-                    ctx.fillRect(dx - 1, by, 2, bandH - 4);
+                    var dx = 6 + Math.floor((d + 1) * 116 / (divs + 1));
+                    ctx.fillRect(dx - 1, by, 2, bandH - 3);
                 }
             }
         } else if (style === 'scattered') {
-            // Random scattered lit windows
-            for (var i = 0; i < 60; i++) {
-                var wx2 = this._randInt(4, 120);
-                var wy2 = this._randInt(4, 248);
-                var ww = this._randInt(4, 12);
-                var wh = this._randInt(4, 10);
-                var lit2 = this._random() < 0.5;
-                ctx.fillStyle = lit2 ? windowColor : '#0a0a15';
-                ctx.globalAlpha = lit2 ? (0.4 + this._random() * 0.5) : 0.8;
+            for (var i = 0; i < 80; i++) {
+                var wx2 = this._randInt(2, 122);
+                var wy2 = this._randInt(2, 250);
+                var ww = this._randInt(5, 14);
+                var wh = this._randInt(4, 12);
+                var lit2 = this._random() < 0.6;
+                ctx.fillStyle = lit2 ? stateColor : '#080810';
+                ctx.globalAlpha = lit2 ? (0.5 + this._random() * 0.5) : 0.9;
                 ctx.fillRect(wx2, wy2, ww, wh);
             }
         } else {
             // 'modern' — large glass panels
-            var panelRows = this._randInt(3, 6);
-            var panelH = Math.floor(220 / panelRows);
+            var panelRows = this._randInt(4, 8);
+            var panelH = Math.floor(230 / panelRows);
             for (var p = 0; p < panelRows; p++) {
-                var py = 18 + p * (panelH + 6);
-                ctx.fillStyle = windowColor;
-                ctx.globalAlpha = 0.25;
-                ctx.fillRect(6, py, 116, panelH - 2);
+                var py = 12 + p * (panelH + 4);
+                ctx.fillStyle = stateColor;
+                ctx.globalAlpha = 0.35;
+                ctx.fillRect(4, py, 120, panelH - 2);
                 // Reflection highlight
                 ctx.fillStyle = '#ffffff';
-                ctx.globalAlpha = 0.05;
-                ctx.fillRect(6, py, 40, panelH - 2);
+                ctx.globalAlpha = 0.08;
+                ctx.fillRect(4, py, 50, panelH - 2);
             }
         }
 
@@ -163,7 +166,6 @@ class CityMetaphor extends Base3DMetaphor {
         var ctx = canvas.getContext('2d');
         ctx.fillStyle = '#141420';
         ctx.fillRect(0, 0, 64, 64);
-        // Some AC units / vents
         for (var i = 0; i < this._randInt(1, 4); i++) {
             ctx.fillStyle = '#2a2a3a';
             var rx = this._randInt(4, 48);
@@ -179,24 +181,43 @@ class CityMetaphor extends Base3DMetaphor {
         var stateColor = this.getStateColor(state);
         var stateColorHex = this.getStateColorHex(state);
 
-        // Building dimensions — proportional to cell
-        var maxW = cellSize * 0.8;
-        var maxD = cellSize * 0.8;
-        var bWidth = this._randRange(maxW * 0.4, maxW * 0.9);
-        var bDepth = this._randRange(maxD * 0.4, maxD * 0.9);
-        var bHeight = this._randRange(4, 35);
+        // Building dimensions
+        var maxW = cellSize * 0.85;
+        var maxD = cellSize * 0.85;
+        var bWidth = this._randRange(maxW * 0.5, maxW * 0.95);
+        var bDepth = this._randRange(maxD * 0.5, maxD * 0.95);
 
-        // Height variation by state — critical/warning buildings shorter (failing)
-        if (state === 'critical') bHeight = this._randRange(3, 10);
-        else if (state === 'warning') bHeight = this._randRange(5, 15);
-        else if (state === 'healthy' || state === 'running') bHeight = this._randRange(10, 40);
+        // MUCH more height variation — real city has skyscrapers
+        var bHeight;
+        var heightRoll = this._random();
+        if (heightRoll < 0.1) {
+            // Skyscraper (10%)
+            bHeight = this._randRange(45, 80);
+        } else if (heightRoll < 0.3) {
+            // Tall (20%)
+            bHeight = this._randRange(25, 45);
+        } else if (heightRoll < 0.6) {
+            // Medium (30%)
+            bHeight = this._randRange(12, 25);
+        } else if (heightRoll < 0.85) {
+            // Short (25%)
+            bHeight = this._randRange(5, 12);
+        } else {
+            // Low (15%)
+            bHeight = this._randRange(3, 6);
+        }
+
+        // State modifies height
+        if (state === 'critical') bHeight = Math.min(bHeight, 8);
+        else if (state === 'warning') bHeight = Math.min(bHeight, 15);
+        else if (state === 'healthy' || state === 'running') bHeight *= 1.2;
 
         // Choose architectural style
         var style = this._randInt(0, 4);
         var windowStyle = this._pick(['grid', 'stripes', 'scattered', 'modern']);
 
         // Window texture for walls
-        var windowTex = this._makeWindowTexture(stateColorHex, bWidth, bHeight, windowStyle);
+        var windowTex = this._makeWindowTexture(stateColorHex, stateColor, bWidth, bHeight, windowStyle);
         windowTex.wrapS = THREE.RepeatWrapping;
         windowTex.wrapT = THREE.RepeatWrapping;
 
@@ -206,12 +227,12 @@ class CityMetaphor extends Base3DMetaphor {
             // Simple box tower
             var geo = new THREE.BoxGeometry(bWidth, bHeight, bDepth);
             var materials = [
-                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.8, metalness: 0.2 }),
-                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.8, metalness: 0.2 }),
+                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.7, metalness: 0.3, emissive: stateColor, emissiveIntensity: 0.12 }),
+                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.7, metalness: 0.3, emissive: stateColor, emissiveIntensity: 0.12 }),
                 new THREE.MeshStandardMaterial({ map: rooftopTex, roughness: 0.9, metalness: 0.1 }),
                 new THREE.MeshStandardMaterial({ color: 0x111118, roughness: 0.9 }),
-                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.8, metalness: 0.2 }),
-                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.8, metalness: 0.2 }),
+                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.7, metalness: 0.3, emissive: stateColor, emissiveIntensity: 0.12 }),
+                new THREE.MeshStandardMaterial({ map: windowTex, roughness: 0.7, metalness: 0.3, emissive: stateColor, emissiveIntensity: 0.12 }),
             ];
             var mesh = new THREE.Mesh(geo, materials);
             mesh.position.y = bHeight / 2;
@@ -227,11 +248,11 @@ class CityMetaphor extends Base3DMetaphor {
                 var tierH = bHeight / tiers * this._randRange(0.6, 1.4);
                 var geo = new THREE.BoxGeometry(currentW, tierH, currentD);
                 var mat = new THREE.MeshStandardMaterial({
-                    map: t === 0 ? windowTex : windowTex,
-                    roughness: 0.7,
-                    metalness: 0.3,
+                    map: windowTex,
+                    roughness: 0.6,
+                    metalness: 0.4,
                     emissive: stateColor,
-                    emissiveIntensity: t === tiers - 1 ? 0.15 : 0.05
+                    emissiveIntensity: 0.08 + t * 0.04
                 });
                 var mesh = new THREE.Mesh(geo, mat);
                 mesh.position.y = currentH + tierH / 2;
@@ -251,7 +272,7 @@ class CityMetaphor extends Base3DMetaphor {
                 roughness: 0.6,
                 metalness: 0.4,
                 emissive: stateColor,
-                emissiveIntensity: 0.1
+                emissiveIntensity: 0.12
             });
             var mesh = new THREE.Mesh(geo, mat);
             mesh.position.y = bHeight / 2;
@@ -278,7 +299,7 @@ class CityMetaphor extends Base3DMetaphor {
                 roughness: 0.7,
                 metalness: 0.3,
                 emissive: stateColor,
-                emissiveIntensity: 0.08
+                emissiveIntensity: 0.1
             });
 
             var geo1 = new THREE.BoxGeometry(bWidth, bHeight, halfD);
@@ -312,7 +333,6 @@ class CityMetaphor extends Base3DMetaphor {
 
         // Rooftop details — antennas, AC units
         if (bHeight > 12 && this._random() < 0.6) {
-            // Antenna
             var antennaH = this._randRange(2, 6);
             var antennaGeo = new THREE.CylinderGeometry(0.1, 0.15, antennaH, 6);
             var antennaMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.3 });
@@ -345,16 +365,16 @@ class CityMetaphor extends Base3DMetaphor {
         }
 
         // State-colored base/foundation glow strip
-        var baseGeo = new THREE.BoxGeometry(bWidth + 0.6, 0.4, bDepth + 0.6);
+        var baseGeo = new THREE.BoxGeometry(bWidth + 0.6, 0.5, bDepth + 0.6);
         var baseMat = new THREE.MeshStandardMaterial({
             color: stateColor,
             emissive: stateColor,
-            emissiveIntensity: 0.6,
+            emissiveIntensity: 0.8,
             roughness: 0.3,
             metalness: 0.5
         });
         var base = new THREE.Mesh(baseGeo, baseMat);
-        base.position.y = 0.2;
+        base.position.y = 0.25;
         group.add(base);
 
         group.position.set(x, 0, z);
@@ -374,16 +394,16 @@ class CityMetaphor extends Base3DMetaphor {
 
     buildScene(entities) {
         if (!this.scene) return;
-        this.seed = 42; // Reset seed for reproducibility
+        this.seed = 42;
 
         // Clear existing buildings
-        this.buildings.forEach(b => {
+        this.buildings.forEach(function(b) {
             if (b.group) this.scene.remove(b.group);
-        });
+        }.bind(this));
         this.buildings = [];
 
-        // === GROUND — smaller, denser city feel ===
-        var gridSize = 80;  // Reduced from 200
+        // === GROUND — city footprint
+        var gridSize = 100;
         var groundGeo = new THREE.PlaneGeometry(gridSize, gridSize);
         var groundMat = new THREE.MeshStandardMaterial({
             color: 0x0d0d22,
@@ -396,14 +416,14 @@ class CityMetaphor extends Base3DMetaphor {
         this.objects.set('ground', ground);
 
         // Grid lines on ground
-        var gridHelper = new THREE.GridHelper(gridSize, 20, 0x1a1a3e, 0x111128);
+        var gridHelper = new THREE.GridHelper(gridSize, 25, 0x1a1a3e, 0x111128);
         gridHelper.position.y = 0.01;
         this.scene.add(gridHelper);
         this.objects.set('gridHelper', gridHelper);
 
         // === SKY / ATMOSPHERE ===
         this.scene.background = new THREE.Color(0x06061a);
-        this.scene.fog = new THREE.FogExp2(0x0a0820, 0.004);
+        this.scene.fog = new THREE.FogExp2(0x0a0820, 0.003);
 
         // Sky dome
         var skyGeo = new THREE.SphereGeometry(300, 32, 32);
@@ -464,40 +484,40 @@ class CityMetaphor extends Base3DMetaphor {
         })));
         this.scene.add(this.objects.get('rain'));
 
-        // Lighting
-        var ambientLight = new THREE.AmbientLight(0x222244, 0.6);
+        // Lighting — brighter to see buildings
+        var ambientLight = new THREE.AmbientLight(0x333355, 0.8);
         this.scene.add(ambientLight);
         this.objects.set('ambientLight', ambientLight);
 
-        var dirLight = new THREE.DirectionalLight(0x4444ff, 0.4);
+        var dirLight = new THREE.DirectionalLight(0x5555aa, 0.6);
         dirLight.position.set(50, 100, 50);
         this.scene.add(dirLight);
         this.objects.set('dirLight', dirLight);
 
-        // Accent point lights for neon feel
+        // Stronger accent point lights for neon feel
         var accentColors = [0xff00ff, 0x00ffff, 0xff6600];
-        for (var al = 0; al < 3; al++) {
-            var pl = new THREE.PointLight(accentColors[al], 0.3, 60);
-            pl.position.set(this._randRange(-30, 30), 15, this._randRange(-30, 30));
+        for (var al = 0; al < 5; al++) {
+            var pl = new THREE.PointLight(accentColors[al % 3], 0.5, 80);
+            pl.position.set(this._randRange(-40, 40), 20, this._randRange(-40, 40));
             this.scene.add(pl);
         }
 
         // === BUILD CITY FROM ENTITIES ===
-        // Collect all leaf entities (services) to place as buildings
         var byId = {};
         entities.forEach(function(e) { byId[e.id] = e; });
         var serviceEntities = entities.filter(function(e) {
             return e.type === 'service' || (e.children && e.children.length === 0);
         });
 
-        // If very few entities, generate filler buildings to make it look like a city
-        var minBuildings = 50;
+        // Target: 60+ buildings for density
+        var minBuildings = 60;
         var fillerCount = Math.max(0, minBuildings - serviceEntities.length);
+        var totalBuildings = serviceEntities.length + fillerCount;
 
-        // Layout: place buildings on a grid within the ground area
-        var cellSize = gridSize / Math.ceil(Math.sqrt(serviceEntities.length + fillerCount));
-        cellSize = Math.max(cellSize, 3);
-        cellSize = Math.min(cellSize, 12);
+        // Layout: tighter packing
+        var cellSize = gridSize / Math.ceil(Math.sqrt(totalBuildings));
+        cellSize = Math.max(cellSize, 2.5);
+        cellSize = Math.min(cellSize, 8);
 
         var gridCols = Math.floor(gridSize / cellSize);
         var gridRows = Math.floor(gridSize / cellSize);
@@ -520,8 +540,8 @@ class CityMetaphor extends Base3DMetaphor {
             }
             if (row >= gridRows) return;
 
-            var x = startX + col * cellSize + (Math.random() - 0.5) * cellSize * 0.2;
-            var z = startZ + row * cellSize + (Math.random() - 0.5) * cellSize * 0.2;
+            var x = startX + col * cellSize + (Math.random() - 0.5) * cellSize * 0.15;
+            var z = startZ + row * cellSize + (Math.random() - 0.5) * cellSize * 0.15;
             occupiedCells[row + ',' + col] = true;
 
             var building = this._createBuilding(x, z, cellSize, state, entity, buildingIndex);
@@ -542,11 +562,11 @@ class CityMetaphor extends Base3DMetaphor {
             }
             if (row >= gridRows) break;
 
-            var x2 = startX + col * cellSize + (Math.random() - 0.5) * cellSize * 0.2;
-            var z2 = startZ + row * cellSize + (Math.random() - 0.5) * cellSize * 0.2;
+            var x2 = startX + col * cellSize + (Math.random() - 0.5) * cellSize * 0.15;
+            var z2 = startZ + row * cellSize + (Math.random() - 0.5) * cellSize * 0.15;
             occupiedCells[row + ',' + col] = true;
 
-            // Filler buildings — random state, no real entity
+            // Filler buildings — random state
             var fillerStates = ['idle', 'idle', 'idle', 'healthy', 'running', 'stopped'];
             var fillerState = this._pick(fillerStates);
             var fillerEntity = {
@@ -565,10 +585,10 @@ class CityMetaphor extends Base3DMetaphor {
             if (col >= gridCols) { col = 0; row++; }
         }
 
-        // === ROADS — between building rows ===
+        // === ROADS — between building rows every 3 rows ===
         var roadMat = new THREE.MeshStandardMaterial({ color: 0x111128, roughness: 0.9 });
-        for (var rz = 0; rz < gridRows; rz += 4) {
-            var roadGeo = new THREE.PlaneGeometry(gridSize, 1.5);
+        for (var rz = 0; rz < gridRows; rz += 3) {
+            var roadGeo = new THREE.PlaneGeometry(gridSize, 1.2);
             var road = new THREE.Mesh(roadGeo, roadMat);
             road.rotation.x = -Math.PI / 2;
             road.position.set(0, 0.02, startZ + rz * cellSize - cellSize * 0.1);
@@ -576,11 +596,11 @@ class CityMetaphor extends Base3DMetaphor {
 
             // Road lane markings
             var markMat = new THREE.MeshBasicMaterial({ color: 0x444466 });
-            for (var m = 0; m < 10; m++) {
+            for (var m = 0; m < 12; m++) {
                 var markGeo = new THREE.PlaneGeometry(1.5, 0.15);
                 var mark = new THREE.Mesh(markGeo, markMat);
                 mark.rotation.x = -Math.PI / 2;
-                mark.position.set(startX + m * cellSize * 1.5, 0.03, startZ + rz * cellSize - cellSize * 0.1);
+                mark.position.set(startX + m * cellSize * 1.3, 0.03, startZ + rz * cellSize - cellSize * 0.1);
                 this.scene.add(mark);
             }
         }
@@ -609,15 +629,14 @@ class CityMetaphor extends Base3DMetaphor {
             var state = b.entity.state;
             var group = b.group;
 
-            // Pulse effect for critical/warning states
             group.traverse(function(child) {
                 if (child.isMesh && child.material && child.material.emissiveIntensity !== undefined) {
                     if (state === 'critical') {
-                        child.material.emissiveIntensity = 0.3 + 0.4 * Math.sin(now * 4 + b.index * 0.7);
+                        child.material.emissiveIntensity = 0.3 + 0.5 * Math.sin(now * 4 + b.index * 0.7);
                     } else if (state === 'warning') {
-                        child.material.emissiveIntensity = 0.2 + 0.25 * Math.sin(now * 2.5 + b.index * 0.5);
+                        child.material.emissiveIntensity = 0.2 + 0.3 * Math.sin(now * 2.5 + b.index * 0.5);
                     } else if (state === 'healthy' || state === 'running') {
-                        child.material.emissiveIntensity = 0.08 + 0.05 * Math.sin(now * 0.8 + b.index * 0.3);
+                        child.material.emissiveIntensity = 0.1 + 0.06 * Math.sin(now * 0.8 + b.index * 0.3);
                     }
                 }
             });

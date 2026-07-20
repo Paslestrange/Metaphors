@@ -3,7 +3,7 @@
 import asyncio
 from playwright.async_api import async_playwright
 
-METAPHORS = ['city', 'traffic_light', 'solar', 'forest']
+METAPHORS = ['city', 'traffic_light', 'forest']
 BASE_URL = 'http://localhost:8080'
 SCREENSHOT_DIR = '/home/pascal/workspace/Metaphors/screenshots'
 

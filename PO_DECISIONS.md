@@ -57,3 +57,11 @@
 3. **Don't build features nobody asked for** — no orchestra metaphor, no ship metaphor, no solar system. Focus on city, space station, garden. Three metaphors is enough for MVP.
 4. **Screenshot every change** — if the dev agent can't prove it looks good with a screenshot, it didn't happen.
 5. **Be honest in reviews** — if the visual is 3/10, say 3/10. Don't sugarcoat.
+
+## Parked Work (Post-MVP)
+
+### Mobile App (Expo) — PARKED 2026-07-20
+The `mobile/` directory contains an Expo app started before MVP scope was locked.
+**Status:** PARKED until after MVP launch. Do NOT work on mobile/ files.
+**Reason:** MVP targets desktop dashboards / war-room displays. Target market is DevOps teams at workstations. Mobile adds zero value for MVP's 4 critical gaps (visual quality, real data sources, alerting, landing page). Revisit only after launch + first paying customers.
+**Action:** Files remain in git history for future revival. No new commits to `mobile/` permitted under current MVP scope.

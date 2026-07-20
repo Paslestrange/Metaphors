@@ -2409,6 +2409,28 @@ function showDetailPanel(entity) {
         </div>`;
     }
 
+    // Uptime display
+    const uptime = m.uptime || m.uptime_hrs;
+    if (uptime !== undefined) {
+        let uptimeText;
+        if (typeof uptime === 'string') {
+            uptimeText = uptime; // Docker returns "Up 2 hours" format
+        } else {
+            // Numeric hours
+            if (uptime < 1) {
+                uptimeText = `${Math.round(uptime * 60)} min`;
+            } else if (uptime < 24) {
+                uptimeText = `${uptime.toFixed(1)} hrs`;
+            } else {
+                uptimeText = `${(uptime / 24).toFixed(1)} days`;
+            }
+        }
+        html += `<div class="detail-row">
+            <span class="detail-key">Uptime</span>
+            <span class="detail-value">${uptimeText}</span>
+        </div>`;
+    }
+
     html += `<div class="detail-row">
         <span class="detail-key">ID</span>
         <span class="detail-value" style="font-family:monospace;font-size:10px;">${entity.id}</span>
@@ -2436,7 +2458,7 @@ function showDetailPanel(entity) {
     }
 
     const metricKeys = Object.keys(m);
-    const skipMetrics = ['cpu', 'cpu_pct', 'mem', 'mem_pct'];
+    const skipMetrics = ['cpu', 'cpu_pct', 'mem', 'mem_pct', 'uptime', 'uptime_hrs'];
     const otherMetrics = metricKeys.filter(k => !skipMetrics.includes(k));
     if (otherMetrics.length > 0) {
         html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #374151;">
@@ -2470,8 +2492,42 @@ function showDetailPanel(entity) {
         html += `</div>`;
     }
 
+    // Logs link
+    const logsLink = buildLogsLink(entity);
+    if (logsLink) {
+        html += `<div style="margin-top:12px;padding-top:8px;border-top:1px solid #374151;">
+            <a href="${logsLink}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:11px;">
+                📋 View Logs →
+            </a>
+        </div>`;
+    }
+
     body.innerHTML = html;
     panel.classList.remove('hidden');
+}
+
+function buildLogsLink(entity) {
+    const m = entity.metrics || {};
+    const src = entity.source || '';
+
+    // Docker containers — link to container logs endpoint
+    if (src === 'docker' && (entity.type === 'container' || entity.id.startsWith('dctr-'))) {
+        const containerId = entity.labels?.container_id || entity.id.replace('dctr-', '');
+        return `/api/logs/docker/${containerId}`;
+    }
+
+    // Prometheus nodes — link to node logs endpoint
+    if (src === 'prometheus' && entity.type === 'node') {
+        const instance = entity.labels?.instance || entity.name;
+        return `/api/logs/prometheus?instance=${encodeURIComponent(instance)}`;
+    }
+
+    // Process source — link to process logs
+    if (src === 'processes' && entity.type === 'process') {
+        return `/api/logs/process?name=${encodeURIComponent(entity.name)}`;
+    }
+
+    return null;
 }
 
 function showDetailPlaceholder() {
