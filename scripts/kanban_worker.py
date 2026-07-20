@@ -172,7 +172,7 @@ class ProjectScanner:
 # ─── Task Creator ──────────────────────────────────────────────────
 
 def existing_tasks():
-    out, _, _ = run("hermes kanban list --json 2>/dev/null")
+    out, _, _ = run("hermes kanban --board metaphors list --json 2>/dev/null")
     try:
         return json.loads(out)
     except (json.JSONDecodeError, KeyError):
@@ -184,7 +184,7 @@ def task_exists(title):
 def create_task(title, body):
     if task_exists(title):
         return False
-    run(f'hermes kanban create "{_sq(title)}" --assignee default --body "{_sq(body)}"')
+    run(f'hermes kanban --board metaphors create "{_sq(title)}" --assignee default --body "{_sq(body)}"')
     return True
 
 def auto_create_tasks(scanner):
@@ -373,7 +373,7 @@ def get_app_version():
 # ─── Kanban Operations ─────────────────────────────────────────────
 
 def get_next_task():
-    out, _, code = run("hermes kanban list --json 2>/dev/null")
+    out, _, code = run("hermes kanban --board metaphors list --json 2>/dev/null")
     if code != 0 or not out:
         return None
     try:
@@ -578,7 +578,7 @@ def main():
     if not screenshot_ok:
         log(f"Screenshot verification FAILED for: {title}")
         # Block the task instead of completing — screenshot looks broken
-        run(f'{HERMES_BIN} kanban block {task_id} --reason "Screenshot verification failed: image appears blank/broken"', workdir=WORKSPACE)
+        run(f'{HERMES_BIN} kanban --board metaphors block {task_id} --reason "Screenshot verification failed: image appears blank/broken"', workdir=WORKSPACE)
         # Send Discord directly, no LLM needed
         files = git_diff_main_names()
         version = get_app_version()
